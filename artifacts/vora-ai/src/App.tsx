@@ -6,6 +6,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import Dashboard from "@/pages/Dashboard";
 import Projects from "@/pages/Projects";
 import SharedProject from "@/pages/SharedProject";
+import Admin from "@/pages/Admin";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -20,6 +21,7 @@ function App() {
               <Route path="/" component={Dashboard} />
               <Route path="/projects" component={Projects} />
               <Route path="/p/:slug" component={SharedProject} />
+              <Route path="/admin" component={Admin} />
               <Route component={NotFound} />
             </Switch>
           </WouterRouter>

@@ -5,7 +5,7 @@ import { GoogleGenAI } from "@google/genai";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTier } from "@/hooks/useTier";
-import { getProject } from "@/lib/projects";
+import { getProject, saveProject, updateProject } from "@/lib/projects";
 import { useZipExport } from "@/hooks/useZipExport";
 import { VoraIcon } from "@/components/VoraIcon";
 import { TemplatesPicker } from "@/components/TemplatesPicker";
@@ -19,7 +19,7 @@ import {
   Mic, Loader2, Sparkles, Code, Copy, Download, RefreshCw, 
   Smartphone, Tablet, Monitor, TerminalSquare, AlertTriangle,
   Wand2, Search, Megaphone, Crown, LogIn, Lock, MoreVertical,
-  Save, Folder, LogOut, Link2
+  Save, Folder, LogOut, Link2, ShieldCheck, Cloud, CheckCircle2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -54,6 +54,7 @@ export default function Dashboard() {
   const [currentProjectId, setCurrentProjectId] = useState<string | undefined>(undefined);
   const [currentProjectTitle, setCurrentProjectTitle] = useState("");
   const [currentSharedSlug, setCurrentSharedSlug] = useState<string | null>(null);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
 
   // Modals
   const [showPricing, setShowPricing] = useState(false);
@@ -87,12 +88,34 @@ export default function Dashboard() {
           setPrompt(p.prompt);
           setHtmlContent(p.html);
           setLastPrompt(p.prompt);
-          if (iframeRef.current) iframeRef.current.srcdoc = p.html;
           if (isMobile) setActiveTab("preview");
         }
       });
     }
   }, [user, isMobile]);
+
+  const autoSave = async (html: string, promptText: string) => {
+    if (!user || !html) return;
+    setAutoSaveStatus("saving");
+    try {
+      if (currentProjectId) {
+        await updateProject(user, currentProjectId, { html, prompt: promptText, title: currentProjectTitle });
+      } else {
+        const title = (currentProjectTitle || promptText.slice(0, 60).trim() || "Untitled").replace(/\n+/g, " ");
+        const id = await saveProject(user, { title, prompt: promptText, html });
+        setCurrentProjectId(id);
+        setCurrentProjectTitle(title);
+        const url = new URL(window.location.href);
+        url.searchParams.set("id", id);
+        window.history.replaceState({}, "", url.toString());
+      }
+      setAutoSaveStatus("saved");
+      setTimeout(() => setAutoSaveStatus((s) => (s === "saved" ? "idle" : s)), 2400);
+    } catch (err) {
+      console.error("Auto-save failed", err);
+      setAutoSaveStatus("idle");
+    }
+  };
 
   useEffect(() => {
     if (transcript) {
@@ -118,8 +141,8 @@ export default function Dashboard() {
 
     setStatus("thinking");
     setErrorMessage("");
-    setHtmlContent("");
     if (sysPrompt === SYSTEM_PROMPT) setLastPrompt(currentPrompt); // Don't override last prompt on auto-fixes
+    if (isMobile) setActiveTab("preview");
 
     try {
       const ai = new GoogleGenAI({ apiKey });
@@ -129,19 +152,26 @@ export default function Dashboard() {
         contents: [{ role: "user", parts: [{ text: currentPrompt }] }],
       });
 
-      setStatus("streaming");
       let fullText = "";
+      let firstChunk = true;
       
       for await (const chunk of responseStream) {
         fullText += chunk.text;
-        let cleanHtml = fullText.replace(/^```html\n?/, "").replace(/```$/, "");
+        const cleanHtml = fullText.replace(/^```html\n?/, "").replace(/```$/, "");
+        if (firstChunk) {
+          setStatus("streaming");
+          firstChunk = false;
+        }
         setHtmlContent(cleanHtml);
-        if (iframeRef.current) iframeRef.current.srcdoc = cleanHtml;
       }
       
       setStatus("idle");
       setTranscript("");
-      if (isMobile) setActiveTab("preview");
+
+      const finalHtml = fullText.replace(/^```html\n?/, "").replace(/```$/, "");
+      if (sysPrompt === SYSTEM_PROMPT && finalHtml) {
+        void autoSave(finalHtml, currentPrompt);
+      }
     } catch (err: any) {
       console.error(err);
       setStatus("error");
@@ -225,6 +255,9 @@ export default function Dashboard() {
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setShowPricing(true)} className="cursor-pointer text-primary">
               <Crown className="w-4 h-4 mr-2" /> Plan: {tier.toUpperCase()}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setLocation("/admin")} className="cursor-pointer">
+              <ShieldCheck className="w-4 h-4 mr-2" /> Owner Console
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={signOut} className="cursor-pointer text-destructive focus:text-destructive">
@@ -335,6 +368,13 @@ export default function Dashboard() {
           {status === "thinking" && "Thinking..."}
           {status === "streaming" && "Vora is shipping..."}
         </div>
+        {user && htmlContent && (
+          <div className="flex items-center gap-1.5 text-[11px]">
+            {autoSaveStatus === "saving" && (<><Loader2 className="w-3 h-3 animate-spin" /> Saving</>)}
+            {autoSaveStatus === "saved" && (<><CheckCircle2 className="w-3 h-3 text-primary" /> Saved</>)}
+            {autoSaveStatus === "idle" && currentProjectId && (<><Cloud className="w-3 h-3" /> Synced</>)}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -482,11 +522,11 @@ export default function Dashboard() {
                 <Button variant="ghost" size="icon" className="h-8 w-8"><MoreVertical className="w-4 h-4" /></Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48 flex flex-wrap gap-1 p-2">
-                <ToolbarButtons />
+                {ToolbarButtons()}
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <ToolbarButtons />
+            ToolbarButtons()
           )}
         </div>
       </div>
@@ -499,8 +539,16 @@ export default function Dashboard() {
               className={`relative bg-white rounded-xl overflow-hidden transition-all duration-500 shadow-2xl ring-1 ring-border/50 ${status === "streaming" ? "ring-primary/50 shadow-[0_0_30px_rgba(0,255,255,0.15)]" : ""} ${!htmlContent ? "bg-transparent ring-0 shadow-none" : ""}`}
               style={{ width: "100%", maxWidth: isMobile ? "100%" : (deviceWidth === "mobile" ? "390px" : deviceWidth === "tablet" ? "768px" : "100%"), height: "100%" }}
             >
-              {!htmlContent ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-background to-background/50 border border-border/20 rounded-xl">
+              <iframe
+                ref={iframeRef}
+                key="vora-preview-iframe"
+                srcDoc={htmlContent || "<!doctype html><html><body style=\"margin:0;background:transparent\"></body></html>"}
+                className={`w-full h-full bg-white ${!htmlContent ? "opacity-0 pointer-events-none" : ""}`}
+                sandbox="allow-scripts"
+                title="Preview"
+              />
+              {!htmlContent && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-background to-background/50 border border-border/20 rounded-xl pointer-events-none">
                   <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center text-center">
                     <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-6 neon-border">
                       <VoraIcon className="w-8 h-8 text-primary" />
@@ -509,8 +557,13 @@ export default function Dashboard() {
                     <p className="text-muted-foreground">We'll build it.</p>
                   </motion.div>
                 </div>
-              ) : (
-                <iframe ref={iframeRef} className="w-full h-full bg-white" sandbox="allow-scripts" title="Preview" />
+              )}
+              {status === "thinking" && !htmlContent && (
+                <div className="absolute inset-0 flex items-center justify-center bg-background/40 backdrop-blur-sm rounded-xl pointer-events-none">
+                  <div className="flex items-center gap-3 px-5 py-2.5 rounded-full border border-primary/30 bg-background/80 text-sm text-primary shadow-[0_0_20px_rgba(0,255,255,0.25)]">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Booting up Gemini
+                  </div>
+                </div>
               )}
             </motion.div>
           </div>
@@ -544,13 +597,13 @@ export default function Dashboard() {
 
   return (
     <div className="h-[100dvh] w-full bg-background text-foreground selection:bg-primary/30 flex flex-col md:flex-row overflow-hidden">
-      <AuthNav />
+      {AuthNav()}
       
       {isMobile ? (
         <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col w-full">
           <div className="flex-1 overflow-hidden">
-            <TabsContent value="compose" className="h-full m-0 data-[state=active]:flex flex-col"><LeftPane /></TabsContent>
-            <TabsContent value="preview" className="h-full m-0 data-[state=active]:flex flex-col"><PreviewPane /></TabsContent>
+            <TabsContent value="compose" className="h-full m-0 data-[state=active]:flex flex-col">{LeftPane()}</TabsContent>
+            <TabsContent value="preview" className="h-full m-0 data-[state=active]:flex flex-col">{PreviewPane()}</TabsContent>
           </div>
           <div className="h-14 bg-background border-t border-border/50 px-4">
             <TabsList className="grid w-full h-full grid-cols-2 bg-transparent">
@@ -564,8 +617,8 @@ export default function Dashboard() {
         </Tabs>
       ) : (
         <>
-          <LeftPane />
-          <PreviewPane />
+          {LeftPane()}
+          {PreviewPane()}
         </>
       )}
 

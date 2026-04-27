@@ -7,6 +7,36 @@ import { Button } from "@/components/ui/button";
 import { Loader2, ArrowUpRight, AlertTriangle } from "lucide-react";
 import { motion } from "framer-motion";
 
+function setMeta(selector: string, attr: string, value: string) {
+  let el = document.head.querySelector<HTMLMetaElement>(selector);
+  if (!el) {
+    el = document.createElement("meta");
+    const [type, key] = selector.replace(/[\[\]"]/g, "").split("=");
+    el.setAttribute(type.replace("meta", ""), key);
+    document.head.appendChild(el);
+  }
+  el.setAttribute(attr, value);
+}
+
+function applyShareMeta(data: SharedProjectData | null) {
+  if (!data) return;
+  const truncatedPrompt = data.prompt.slice(0, 180);
+  document.title = `${data.title} — Built with Vora AI`;
+
+  setMeta('meta[name="description"]', "content", truncatedPrompt);
+  setMeta('meta[property="og:type"]', "content", "website");
+  setMeta('meta[property="og:title"]', "content", `${data.title} — Built with Vora AI`);
+  setMeta('meta[property="og:description"]', "content", truncatedPrompt);
+  setMeta('meta[property="og:url"]', "content", window.location.href);
+  setMeta('meta[name="twitter:card"]', "content", "summary_large_image");
+  setMeta('meta[name="twitter:title"]', "content", `${data.title} — Built with Vora AI`);
+  setMeta('meta[name="twitter:description"]', "content", truncatedPrompt);
+}
+
+function resetMeta() {
+  document.title = "Vora AI — Speak it. Type it. Ship it.";
+}
+
 export default function SharedProject() {
   const [, params] = useRoute("/p/:slug");
   const slug = params?.slug;
@@ -45,6 +75,13 @@ export default function SharedProject() {
       cancelled = true;
     };
   }, [slug]);
+
+  useEffect(() => {
+    applyShareMeta(data);
+    return () => {
+      resetMeta();
+    };
+  }, [data]);
 
   if (loading) {
     return (

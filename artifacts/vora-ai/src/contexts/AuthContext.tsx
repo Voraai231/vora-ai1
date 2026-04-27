@@ -1,7 +1,28 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { User, signInWithPopup, signOut as firebaseSignOut, onAuthStateChanged } from "firebase/auth";
-import { auth, googleProvider, hasFirebaseConfig } from "@/lib/firebase";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { auth, googleProvider, hasFirebaseConfig, db } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
+
+async function upsertUserProfile(user: User) {
+  if (!hasFirebaseConfig) return;
+  try {
+    await setDoc(
+      doc(db, "users", user.uid),
+      {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName,
+        photoURL: user.photoURL,
+        lastSeenAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.error("Failed to upsert user profile", err);
+  }
+}
 
 interface AuthContextType {
   user: User | null;
@@ -25,6 +46,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoading(false);
+      if (currentUser) {
+        void upsertUserProfile(currentUser);
+      }
     });
     return unsubscribe;
   }, []);
