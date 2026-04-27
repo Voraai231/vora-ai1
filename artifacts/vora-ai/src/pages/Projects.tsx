@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { listProjects, deleteProject, Project } from "@/lib/projects";
 import { Button } from "@/components/ui/button";
 import { VoraIcon } from "@/components/VoraIcon";
-import { ArrowLeft, Trash2, ExternalLink, Loader2, LogIn } from "lucide-react";
+import { ArrowLeft, Trash2, ExternalLink, Loader2, LogIn, Globe } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
 import { motion } from "framer-motion";
@@ -133,6 +133,12 @@ export default function Projects() {
                     tabIndex={-1}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
+                  {project.sharedSlug && (
+                    <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-background/80 backdrop-blur-sm border border-primary/40 text-[10px] font-semibold uppercase tracking-wider text-primary">
+                      <Globe className="w-3 h-3" />
+                      Public
+                    </div>
+                  )}
                 </div>
 
                 {/* Details */}

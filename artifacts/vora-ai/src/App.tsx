@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
 import Dashboard from "@/pages/Dashboard";
 import Projects from "@/pages/Projects";
+import SharedProject from "@/pages/SharedProject";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -18,6 +19,7 @@ function App() {
             <Switch>
               <Route path="/" component={Dashboard} />
               <Route path="/projects" component={Projects} />
+              <Route path="/p/:slug" component={SharedProject} />
               <Route component={NotFound} />
             </Switch>
           </WouterRouter>

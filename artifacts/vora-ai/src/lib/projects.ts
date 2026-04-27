@@ -10,6 +10,7 @@ export interface Project {
   createdAt: Timestamp | Date;
   updatedAt: Timestamp | Date;
   thumbnail?: string;
+  sharedSlug?: string | null;
 }
 
 export async function saveProject(user: User, data: { title: string; prompt: string; html: string; thumbnail?: string }): Promise<string> {

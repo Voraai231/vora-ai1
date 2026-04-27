@@ -14,11 +14,12 @@ import { VercelDeployModal } from "@/components/VercelDeployModal";
 import { SaveProjectModal } from "@/components/SaveProjectModal";
 import { PromoteModal } from "@/components/PromoteModal";
 import { SEOMaster } from "@/components/SEOMaster";
+import { ShareModal } from "@/components/ShareModal";
 import {
   Mic, Loader2, Sparkles, Code, Copy, Download, RefreshCw, 
   Smartphone, Tablet, Monitor, TerminalSquare, AlertTriangle,
   Wand2, Search, Megaphone, Crown, LogIn, Lock, MoreVertical,
-  Save, Folder, LogOut
+  Save, Folder, LogOut, Link2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -52,12 +53,14 @@ export default function Dashboard() {
   // Project State
   const [currentProjectId, setCurrentProjectId] = useState<string | undefined>(undefined);
   const [currentProjectTitle, setCurrentProjectTitle] = useState("");
+  const [currentSharedSlug, setCurrentSharedSlug] = useState<string | null>(null);
 
   // Modals
   const [showPricing, setShowPricing] = useState(false);
   const [showVercel, setShowVercel] = useState(false);
   const [showSave, setShowSave] = useState(false);
   const [showPromote, setShowPromote] = useState(false);
+  const [showShare, setShowShare] = useState(false);
 
   const { isListening, transcript, supported, toggleListening, setTranscript } = useSpeech();
   const { toast } = useToast();
@@ -80,6 +83,7 @@ export default function Dashboard() {
         if (p) {
           setCurrentProjectId(p.id);
           setCurrentProjectTitle(p.title);
+          setCurrentSharedSlug(p.sharedSlug ?? null);
           setPrompt(p.prompt);
           setHtmlContent(p.html);
           setLastPrompt(p.prompt);
@@ -383,6 +387,28 @@ export default function Dashboard() {
           <TooltipContent>{!currentProjectTitle ? "Save project first to Promote" : "Promote Kit (Premium)"}</TooltipContent>
         </Tooltip>
 
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`h-8 w-8 ${currentSharedSlug ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={() => {
+                if (!user) { toast({ title: "Sign in required", description: "Sign in to share your project." }); return; }
+                if (!currentProjectId) { toast({ title: "Save first", description: "Save the project to share a public link." }); return; }
+                setShowShare(true);
+              }}
+              disabled={!htmlContent}
+            >
+              <div className="relative">
+                <Link2 className="w-4 h-4" />
+                {currentSharedSlug && <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_6px_rgba(0,255,255,0.8)]" />}
+              </div>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{currentSharedSlug ? "Public link active" : !currentProjectId ? "Save project first to Share" : "Share public link"}</TooltipContent>
+        </Tooltip>
+
         <div className="w-px h-4 bg-border/50 mx-1 hidden sm:block" />
 
         <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground hidden sm:inline-flex" onClick={() => setShowCode(!showCode)} title="Toggle Code">
@@ -556,6 +582,16 @@ export default function Dashboard() {
         onSaved={(id, title) => { setCurrentProjectId(id); setCurrentProjectTitle(title); }}
       />
       <PromoteModal open={showPromote} onOpenChange={setShowPromote} html={htmlContent} prompt={lastPrompt || prompt} title={currentProjectTitle} />
+      <ShareModal
+        open={showShare}
+        onOpenChange={setShowShare}
+        projectId={currentProjectId}
+        title={currentProjectTitle}
+        prompt={lastPrompt || prompt}
+        html={htmlContent}
+        initialSlug={currentSharedSlug}
+        onShared={(slug) => setCurrentSharedSlug(slug)}
+      />
     </div>
   );
 }
