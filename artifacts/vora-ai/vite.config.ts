@@ -36,7 +36,12 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),
-      "@assets": path.resolve(import.meta.dirname, "..", "..", "attached_assets"),
+      "@assets": path.resolve(
+        import.meta.dirname,
+        "..",
+        "..",
+        "attached_assets",
+      ),
     },
     dedupe: ["react", "react-dom"],
   },
@@ -44,6 +49,7 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    sourcemap: false, // <-- YE LINE ADD KARNI HAI
   },
   server: {
     port,
