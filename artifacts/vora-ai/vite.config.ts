@@ -44,6 +44,18 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    chunkSizeWarningLimit: 800,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-react": ["react", "react-dom", "wouter"],
+          "vendor-firebase": ["firebase/app", "firebase/auth", "firebase/firestore"],
+          "vendor-genai": ["@google/genai"],
+          "vendor-ui": ["framer-motion", "lucide-react"],
+          "vendor-zip": ["jszip", "file-saver"],
+        },
+      },
+    },
   },
   server: {
     port,

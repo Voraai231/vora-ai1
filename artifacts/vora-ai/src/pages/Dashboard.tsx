@@ -5,7 +5,7 @@ import { GoogleGenAI } from "@google/genai";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTier } from "@/hooks/useTier";
-import { getProject, saveProject, updateProject } from "@/lib/projects";
+import { getProject, saveProject, updateProject, getLatestProject } from "@/lib/projects";
 import { useZipExport } from "@/hooks/useZipExport";
 import { VoraIcon } from "@/components/VoraIcon";
 import { TemplatesPicker } from "@/components/TemplatesPicker";
@@ -29,6 +29,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsMobile } from "@/hooks/use-mobile";
+
+const LAST_PROJECT_KEY = "vora_last_project_id";
 
 const SYSTEM_PROMPT = `You are Vora AI, an elite frontend engineer that outputs production-quality websites.
 
@@ -120,20 +122,31 @@ export default function Dashboard() {
 
   // Load project from URL if present
   useEffect(() => {
+    if (!user) return;
     const params = new URLSearchParams(window.location.search);
-    const id = params.get("id");
-    if (id && user) {
-      getProject(user, id).then(p => {
-        if (p) {
-          setCurrentProjectId(p.id);
-          setCurrentProjectTitle(p.title);
-          setCurrentSharedSlug(p.sharedSlug ?? null);
-          setPrompt(p.prompt);
-          setHtmlContent(p.html);
-          setLastPrompt(p.prompt);
-          if (isMobile) setActiveTab("preview");
-        }
-      });
+    const idFromUrl = params.get("id");
+    const lastId = (() => { try { return localStorage.getItem(LAST_PROJECT_KEY); } catch { return null; } })();
+    const targetId = idFromUrl || lastId;
+
+    const apply = (p: any) => {
+      if (!p) return;
+      setCurrentProjectId(p.id);
+      setCurrentProjectTitle(p.title);
+      setCurrentSharedSlug(p.sharedSlug ?? null);
+      setPrompt(p.prompt);
+      setHtmlContent(p.html);
+      setLastPrompt(p.prompt);
+      try { localStorage.setItem(LAST_PROJECT_KEY, p.id); } catch {}
+      if (isMobile) setActiveTab("preview");
+    };
+
+    if (targetId) {
+      getProject(user, targetId).then((p) => {
+        if (p) apply(p);
+        else getLatestProject(user).then(apply);
+      }).catch(() => getLatestProject(user).then(apply).catch(() => {}));
+    } else {
+      getLatestProject(user).then(apply).catch(() => {});
     }
   }, [user, isMobile]);
 
@@ -143,11 +156,13 @@ export default function Dashboard() {
     try {
       if (currentProjectId) {
         await updateProject(user, currentProjectId, { html, prompt: promptText, title: currentProjectTitle });
+        try { localStorage.setItem(LAST_PROJECT_KEY, currentProjectId); } catch {}
       } else {
         const title = (currentProjectTitle || promptText.slice(0, 60).trim() || "Untitled").replace(/\n+/g, " ");
         const id = await saveProject(user, { title, prompt: promptText, html });
         setCurrentProjectId(id);
         setCurrentProjectTitle(title);
+        try { localStorage.setItem(LAST_PROJECT_KEY, id); } catch {}
         const url = new URL(window.location.href);
         url.searchParams.set("id", id);
         window.history.replaceState({}, "", url.toString());
@@ -187,44 +202,58 @@ export default function Dashboard() {
     if (sysPrompt === SYSTEM_PROMPT) setLastPrompt(currentPrompt); // Don't override last prompt on auto-fixes
     if (isMobile) setActiveTab("preview");
 
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const responseStream = await ai.models.generateContentStream({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: currentPrompt }] }],
-        config: {
-          systemInstruction: sysPrompt,
-          temperature: 0.7,
-          responseMimeType: "text/plain",
-        },
-      });
+    const MAX_RETRIES = 2;
+    let attempt = 0;
+    let lastError: any = null;
 
-      let fullText = "";
-      let firstChunk = true;
-      
-      for await (const chunk of responseStream) {
-        fullText += chunk.text ?? "";
-        const cleanHtml = sanitizeHtml(fullText);
-        if (firstChunk) {
-          setStatus("streaming");
-          firstChunk = false;
+    while (attempt <= MAX_RETRIES) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const responseStream = await ai.models.generateContentStream({
+          model: "gemini-2.5-flash",
+          contents: [{ role: "user", parts: [{ text: currentPrompt }] }],
+          config: {
+            systemInstruction: sysPrompt,
+            temperature: 0.7,
+            responseMimeType: "text/plain",
+          },
+        });
+
+        let fullText = "";
+        let firstChunk = true;
+
+        for await (const chunk of responseStream) {
+          fullText += chunk.text ?? "";
+          const cleanHtml = sanitizeHtml(fullText);
+          if (firstChunk) {
+            setStatus("streaming");
+            firstChunk = false;
+          }
+          setHtmlContent(cleanHtml);
         }
-        setHtmlContent(cleanHtml);
-      }
-      
-      setStatus("idle");
-      setTranscript("");
 
-      const finalHtml = sanitizeHtml(fullText);
-      if (finalHtml) setHtmlContent(finalHtml);
-      if (sysPrompt === SYSTEM_PROMPT && finalHtml) {
-        void autoSave(finalHtml, currentPrompt);
+        setStatus("idle");
+        setTranscript("");
+
+        const finalHtml = sanitizeHtml(fullText);
+        if (finalHtml) setHtmlContent(finalHtml);
+        if (sysPrompt === SYSTEM_PROMPT && finalHtml) {
+          void autoSave(finalHtml, currentPrompt);
+        }
+        return;
+      } catch (err: any) {
+        lastError = err;
+        attempt += 1;
+        const isNetwork = /failed to fetch|network|timeout|aborted|ECONN/i.test(err?.message || "");
+        if (attempt > MAX_RETRIES || !isNetwork) break;
+        await new Promise((r) => setTimeout(r, 600 * attempt));
+        setStatus("thinking");
       }
-    } catch (err: any) {
-      console.error(err);
-      setStatus("error");
-      setErrorMessage(err.message || "An error occurred.");
     }
+
+    console.error(lastError);
+    setStatus("error");
+    setErrorMessage(lastError?.message || "Generation failed. Tap Try Again.");
   };
 
   const handleMagicWand = () => {
@@ -536,7 +565,13 @@ export default function Dashboard() {
   const PreviewPane = () => (
     <div className="flex-1 flex flex-col relative bg-[#0a0a0a] overflow-hidden">
       {!isMobile && <div className="absolute left-0 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-primary/50 to-transparent opacity-50" />}
-      
+
+      {(status === "thinking" || status === "streaming") && (
+        <div className="absolute top-0 left-0 right-0 z-30 pointer-events-none">
+          <div className="stream-bar" />
+        </div>
+      )}
+
       <div className="h-14 border-b border-border/30 flex items-center justify-between px-4 bg-background/40 backdrop-blur-sm z-20">
         <div className="flex items-center gap-1.5">
           {!isMobile && (

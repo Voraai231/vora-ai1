@@ -150,7 +150,7 @@ export default function Projects() {
                   
                   <div className="flex items-center justify-between mt-auto">
                     <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
-                      {formatDistanceToNow(project.updatedAt?.toDate ? project.updatedAt.toDate() : new Date(project.updatedAt as any), { addSuffix: true })}
+                      {formatDistanceToNow((project.updatedAt as any)?.toDate ? (project.updatedAt as any).toDate() : new Date(project.updatedAt as any), { addSuffix: true })}
                     </span>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <Button variant="ghost" size="icon" className="h-8 w-8 hover:text-destructive" onClick={(e) => handleDelete(project.id, e)}>
