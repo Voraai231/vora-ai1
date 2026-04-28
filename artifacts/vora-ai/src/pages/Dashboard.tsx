@@ -1,26 +1,30 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import { GoogleGenAI } from "@google/genai";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useAuth } from "@/contexts/AuthContext";
-import { useTier } from "@/hooks/useTier";
-import { getProject, saveProject, updateProject, getLatestProject } from "@/lib/projects";
+import { useTier, FREE_PROJECT_LIMIT } from "@/hooks/useTier";
+import { useHistory } from "@/hooks/useHistory";
+import { getProject, saveProject, updateProject, getLatestProject, listProjects } from "@/lib/projects";
 import { useZipExport } from "@/hooks/useZipExport";
 import { useIsOwner } from "@/hooks/useIsOwner";
 import { VoraIcon } from "@/components/VoraIcon";
 import { TemplatesPicker } from "@/components/TemplatesPicker";
 import { PricingModal } from "@/components/PricingModal";
-import { VercelDeployModal } from "@/components/VercelDeployModal";
+import { DeployModal } from "@/components/DeployModal";
 import { SaveProjectModal } from "@/components/SaveProjectModal";
 import { PromoteModal } from "@/components/PromoteModal";
 import { SEOMaster } from "@/components/SEOMaster";
 import { ShareModal } from "@/components/ShareModal";
+import { MagicRefine } from "@/components/MagicRefine";
+import { LoadingSteps } from "@/components/LoadingSteps";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
-  Mic, Loader2, Sparkles, Code, Copy, Download, RefreshCw, 
-  Smartphone, Tablet, Monitor, TerminalSquare, AlertTriangle,
-  Wand2, Search, Megaphone, Crown, LogIn, Lock, MoreVertical,
-  Save, Folder, LogOut, Link2, ShieldCheck, Cloud, CheckCircle2
+  Mic, Loader2, Sparkles, Code, Copy, Download, Smartphone, Tablet, Monitor,
+  TerminalSquare, AlertTriangle, Wand2, Search, Megaphone, Crown, LogIn, Lock,
+  MoreVertical, Save, Folder, LogOut, Link2, ShieldCheck, Cloud, CheckCircle2,
+  Undo2, Redo2, Rocket
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -60,23 +64,26 @@ DOCUMENT REQUIREMENTS:
 
 Remember: raw HTML only. Your entire response is fed directly into an iframe srcdoc.`;
 
+const REFINE_PROMPT = `You are Vora AI editing an existing HTML document. The user has asked for a SPECIFIC small change.
+
+RULES:
+- Preserve EVERY part of the existing document EXCEPT what the user asked to change.
+- Output the ENTIRE updated HTML document, not a diff.
+- Same output contract: raw HTML only, no markdown, no commentary, starts with "<", ends with ">".
+- Keep the existing color palette and structure unless the change is specifically about that.`;
+
 function sanitizeHtml(raw: string): string {
   let html = raw.trim();
-  // Strip markdown code fences if the model still adds them
   html = html.replace(/^```(?:html|HTML)?\s*\n?/, "").replace(/\n?```\s*$/, "");
-  // Trim leading conversational lines until we hit a tag
   const firstAngle = html.indexOf("<");
   if (firstAngle > 0) html = html.slice(firstAngle);
-  // Trim trailing junk after the final tag
   const lastAngle = html.lastIndexOf(">");
   if (lastAngle !== -1 && lastAngle < html.length - 1) html = html.slice(0, lastAngle + 1);
   if (!html) return html;
   const lower = html.toLowerCase();
-  // If model returned only a fragment, wrap it
   if (!lower.includes("<html")) {
     html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Vora Preview</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-slate-950 text-white">${html}</body></html>`;
   } else if (!lower.includes("cdn.tailwindcss.com")) {
-    // Inject Tailwind CDN if missing
     if (lower.includes("</head>")) {
       html = html.replace(/<\/head>/i, '<script src="https://cdn.tailwindcss.com"></script></head>');
     } else if (lower.includes("<body")) {
@@ -88,23 +95,24 @@ function sanitizeHtml(raw: string): string {
 
 export default function Dashboard() {
   const [prompt, setPrompt] = useState("");
-  const [htmlContent, setHtmlContent] = useState("");
+  const html = useHistory<string>("", 30);
+  const htmlContent = html.value;
+
   const [status, setStatus] = useState<"idle" | "thinking" | "streaming" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [deviceWidth, setDeviceWidth] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [showCode, setShowCode] = useState(false);
   const [showSeo, setShowSeo] = useState(false);
   const [lastPrompt, setLastPrompt] = useState("");
-  
-  // Project State
+
   const [currentProjectId, setCurrentProjectId] = useState<string | undefined>(undefined);
   const [currentProjectTitle, setCurrentProjectTitle] = useState("");
   const [currentSharedSlug, setCurrentSharedSlug] = useState<string | null>(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const [projectCount, setProjectCount] = useState<number | null>(null);
 
-  // Modals
   const [showPricing, setShowPricing] = useState(false);
-  const [showVercel, setShowVercel] = useState(false);
+  const [showDeploy, setShowDeploy] = useState(false);
   const [showSave, setShowSave] = useState(false);
   const [showPromote, setShowPromote] = useState(false);
   const [showShare, setShowShare] = useState(false);
@@ -112,18 +120,18 @@ export default function Dashboard() {
   const { isListening, transcript, supported, toggleListening, setTranscript } = useSpeech();
   const { toast } = useToast();
   const { user, signIn, signOut } = useAuth();
-  const { tier } = useTier();
+  const { tier, label: tierLabel, isPaid, canDownload } = useTier();
   const { exportZip, isExporting: isZipping } = useZipExport();
   const { isOwner } = useIsOwner();
   const [stripBadge, setStripBadge] = useState(false);
   const isMobile = useIsMobile();
-  const [location, setLocation] = useLocation();
+  const [, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState("compose");
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const codeEndRef = useRef<HTMLDivElement>(null);
 
-  // Load project from URL if present
+  // FIX persistence bug: only re-load when user changes (was: [user, isMobile] → caused project flicker on viewport change)
   useEffect(() => {
     if (!user) return;
     const params = new URLSearchParams(window.location.search);
@@ -137,10 +145,9 @@ export default function Dashboard() {
       setCurrentProjectTitle(p.title);
       setCurrentSharedSlug(p.sharedSlug ?? null);
       setPrompt(p.prompt);
-      setHtmlContent(p.html);
+      html.reset(p.html);
       setLastPrompt(p.prompt);
       try { localStorage.setItem(LAST_PROJECT_KEY, p.id); } catch {}
-      if (isMobile) setActiveTab("preview");
     };
 
     if (targetId) {
@@ -151,20 +158,34 @@ export default function Dashboard() {
     } else {
       getLatestProject(user).then(apply).catch(() => {});
     }
-  }, [user, isMobile]);
+    // Pre-load project count for free-tier limit checks.
+    listProjects(user).then((arr) => setProjectCount(arr.length)).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid]);
 
-  const autoSave = async (html: string, promptText: string) => {
-    if (!user || !html) return;
+  const autoSave = useCallback(async (newHtml: string, promptText: string) => {
+    if (!user || !newHtml) return;
     setAutoSaveStatus("saving");
     try {
       if (currentProjectId) {
-        await updateProject(user, currentProjectId, { html, prompt: promptText, title: currentProjectTitle });
+        await updateProject(user, currentProjectId, { html: newHtml, prompt: promptText, title: currentProjectTitle });
         try { localStorage.setItem(LAST_PROJECT_KEY, currentProjectId); } catch {}
       } else {
+        // Free-tier soft limit: don't auto-create new projects beyond cap; require explicit upgrade.
+        if (tier === "starter" && (projectCount ?? 0) >= FREE_PROJECT_LIMIT) {
+          setAutoSaveStatus("idle");
+          toast({
+            title: "Free plan limit reached",
+            description: `Free includes ${FREE_PROJECT_LIMIT} saved sites. Upgrade to keep this one.`,
+          });
+          setShowPricing(true);
+          return;
+        }
         const title = (currentProjectTitle || promptText.slice(0, 60).trim() || "Untitled").replace(/\n+/g, " ");
-        const id = await saveProject(user, { title, prompt: promptText, html });
+        const id = await saveProject(user, { title, prompt: promptText, html: newHtml });
         setCurrentProjectId(id);
         setCurrentProjectTitle(title);
+        setProjectCount((c) => (c ?? 0) + 1);
         try { localStorage.setItem(LAST_PROJECT_KEY, id); } catch {}
         const url = new URL(window.location.href);
         url.searchParams.set("id", id);
@@ -176,23 +197,32 @@ export default function Dashboard() {
       console.error("Auto-save failed", err);
       setAutoSaveStatus("idle");
     }
-  };
+  }, [user, currentProjectId, currentProjectTitle, tier, projectCount, toast]);
 
   useEffect(() => {
-    if (transcript) {
-      setPrompt(prev => prev.replace(transcript, "") + transcript);
-    }
+    if (transcript) setPrompt((prev) => prev.replace(transcript, "") + transcript);
   }, [transcript]);
 
   useEffect(() => {
-    if (showCode && status === "streaming") {
-      codeEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
+    if (showCode && status === "streaming") codeEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [htmlContent, showCode, status]);
 
-  const handleGenerate = async (currentPrompt: string = prompt, sysPrompt: string = SYSTEM_PROMPT) => {
-    if (!currentPrompt.trim()) return;
-    
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (!meta) return;
+      if (e.key === "z" && !e.shiftKey) { e.preventDefault(); html.undo(); }
+      else if ((e.key === "z" && e.shiftKey) || e.key === "y") { e.preventDefault(); html.redo(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [html]);
+
+  type Intent = "generate" | "refine" | "fix";
+
+  const runGeneration = async (input: string, sysPrompt: string, intent: Intent) => {
+    if (!input.trim()) return;
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
     if (!apiKey) {
       setStatus("error");
@@ -202,7 +232,7 @@ export default function Dashboard() {
 
     setStatus("thinking");
     setErrorMessage("");
-    if (sysPrompt === SYSTEM_PROMPT) setLastPrompt(currentPrompt); // Don't override last prompt on auto-fixes
+    if (intent === "generate") setLastPrompt(input);
     if (isMobile) setActiveTab("preview");
 
     const MAX_RETRIES = 2;
@@ -214,34 +244,27 @@ export default function Dashboard() {
         const ai = new GoogleGenAI({ apiKey });
         const responseStream = await ai.models.generateContentStream({
           model: "gemini-2.5-flash",
-          contents: [{ role: "user", parts: [{ text: currentPrompt }] }],
-          config: {
-            systemInstruction: sysPrompt,
-            temperature: 0.7,
-            responseMimeType: "text/plain",
-          },
+          contents: [{ role: "user", parts: [{ text: input }] }],
+          config: { systemInstruction: sysPrompt, temperature: 0.7, responseMimeType: "text/plain" },
         });
 
         let fullText = "";
         let firstChunk = true;
-
         for await (const chunk of responseStream) {
           fullText += chunk.text ?? "";
           const cleanHtml = sanitizeHtml(fullText);
-          if (firstChunk) {
-            setStatus("streaming");
-            firstChunk = false;
-          }
-          setHtmlContent(cleanHtml);
+          if (firstChunk) { setStatus("streaming"); firstChunk = false; }
+          html.replace(cleanHtml);
         }
 
         setStatus("idle");
         setTranscript("");
-
         const finalHtml = sanitizeHtml(fullText);
-        if (finalHtml) setHtmlContent(finalHtml);
-        if (sysPrompt === SYSTEM_PROMPT && finalHtml) {
-          void autoSave(finalHtml, currentPrompt);
+        if (finalHtml) {
+          html.push(finalHtml);
+          // Use original prompt for autosave on refines/fixes so the project's prompt stays meaningful.
+          const promptForSave = intent === "generate" ? input : (lastPrompt || input);
+          void autoSave(finalHtml, promptForSave);
         }
         return;
       } catch (err: any) {
@@ -259,23 +282,26 @@ export default function Dashboard() {
     setErrorMessage(lastError?.message || "Generation failed. Tap Try Again.");
   };
 
+  const handleGenerate = (text: string = prompt) => runGeneration(text, SYSTEM_PROMPT, "generate");
+
+  const handleRefine = (instruction: string) => {
+    if (!htmlContent) return;
+    const input = `User instruction: ${instruction}\n\n=== EXISTING HTML (modify only the parts the instruction mentions) ===\n${htmlContent}`;
+    runGeneration(input, REFINE_PROMPT, "refine");
+    toast({ title: "Refining", description: instruction.slice(0, 80) });
+  };
+
   const handleMagicWand = () => {
-    if (tier === "starter") {
-      setShowPricing(true);
-      return;
-    }
-    const fixPrompt = "You are a senior frontend engineer. Audit this HTML for UI bugs (broken layouts, accessibility issues, contrast problems, mobile breakage, missing alt text, unclosed tags, broken Tailwind classes, missing meta tags) and return a FIXED full HTML document. Output only raw HTML, no commentary, no markdown fences.\n\nHTML to fix:\n" + htmlContent;
-    handleGenerate(fixPrompt, "Return ONLY raw HTML. Fix all issues.");
+    if (!isPaid) { setShowPricing(true); return; }
+    const input = "Audit this HTML for UI bugs (broken layouts, accessibility issues, contrast problems, mobile breakage, missing alt text, unclosed tags, broken Tailwind classes, missing meta tags) and return a FIXED full HTML document.\n\nHTML:\n" + htmlContent;
+    runGeneration(input, "Return ONLY raw HTML. Fix all issues.", "fix");
     toast({ title: "Magic Wand activated", description: "Fixing layout and accessibility issues..." });
   };
 
   const handleSEOFix = (issues: string[]) => {
-    if (tier === "starter") {
-      setShowPricing(true);
-      return;
-    }
-    const fixPrompt = `Fix the following SEO issues in this HTML document:\n${issues.join("\n")}\n\nHTML:\n${htmlContent}`;
-    handleGenerate(fixPrompt, "Return ONLY raw HTML. Fix the requested SEO issues.");
+    if (!isPaid) { setShowPricing(true); return; }
+    const input = `Fix the following SEO issues in this HTML document:\n${issues.join("\n")}\n\nHTML:\n${htmlContent}`;
+    runGeneration(input, "Return ONLY raw HTML. Fix the requested SEO issues.", "fix");
     toast({ title: "Fixing SEO", description: "Applying AI optimizations..." });
   };
 
@@ -284,14 +310,17 @@ export default function Dashboard() {
     toast({ title: "Copied!", description: "HTML copied to clipboard." });
   };
 
+  // FREEMIUM TRAP: download requires sign-in, plus paid for ZIP source tree.
   const handleDownload = () => {
-    // Owner OR any premium user gets the full source-tree ZIP.
-    // Owner is the only one who may strip the "Built with Vora AI" badge.
-    if (isOwner || tier !== "starter") {
-      exportZip(htmlContent, lastPrompt, currentProjectTitle, {
-        stripBadge: isOwner && stripBadge,
-      });
+    if (!user) {
+      toast({ title: "Sign in to download", description: "Free accounts get the .html file. Pro/Lifetime get the full source ZIP." });
+      signIn();
+      return;
+    }
+    if (isOwner || canDownload) {
+      exportZip(htmlContent, lastPrompt, currentProjectTitle, { stripBadge: isOwner && stripBadge });
     } else {
+      // Signed-in Free users: can download the single-file HTML, but Pro unlocks the full source ZIP.
       const blob = new Blob([htmlContent], { type: "text/html" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -299,7 +328,14 @@ export default function Dashboard() {
       a.download = `${currentProjectTitle || "vora"}.html`;
       a.click();
       URL.revokeObjectURL(url);
+      toast({ title: "Downloaded HTML", description: "Upgrade to Pro for the full production source tree (ZIP)." });
     }
+  };
+
+  const handleDeploy = () => {
+    if (!user) { toast({ title: "Sign in to deploy" }); signIn(); return; }
+    if (!isPaid) { setShowPricing(true); return; }
+    setShowDeploy(true);
   };
 
   const copyMyUid = async () => {
@@ -307,25 +343,14 @@ export default function Dashboard() {
     try {
       await navigator.clipboard.writeText(user.uid);
       toast({ title: "User ID copied", description: "Set VITE_OWNER_UID to lock owner access." });
-    } catch {
-      toast({ title: user.uid });
-    }
+    } catch { toast({ title: user.uid }); }
   };
 
-  const requirePremium = (fn: () => void) => {
-    if (tier === "starter") setShowPricing(true);
-    else fn();
-  };
+  const requirePremium = (fn: () => void) => { if (!isPaid) setShowPricing(true); else fn(); };
 
-  const requireAuthAndPremium = (fn: () => void) => {
-    if (!user) toast({ title: "Sign in required", description: "Please sign in to use this feature." });
-    else if (tier === "starter") setShowPricing(true);
-    else fn();
-  };
-
-  // UI Components
   const AuthNav = () => (
-    <div className="absolute top-4 right-4 z-50 flex items-center gap-3">
+    <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
+      <ThemeToggle />
       {user ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -346,9 +371,12 @@ export default function Dashboard() {
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => setLocation("/projects")} className="cursor-pointer">
               <Folder className="w-4 h-4 mr-2" /> My Projects
+              {tier === "starter" && projectCount !== null && (
+                <span className="ml-auto text-[10px] text-muted-foreground">{projectCount}/{FREE_PROJECT_LIMIT}</span>
+              )}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setShowPricing(true)} className="cursor-pointer text-primary">
-              <Crown className="w-4 h-4 mr-2" /> Plan: {tier.toUpperCase()}
+              <Crown className="w-4 h-4 mr-2" /> Plan: {tierLabel}
             </DropdownMenuItem>
             {isOwner && (
               <DropdownMenuItem onClick={() => setLocation("/admin")} className="cursor-pointer text-primary">
@@ -359,14 +387,18 @@ export default function Dashboard() {
               <Code className="w-3.5 h-3.5 mr-2" /> Copy my User ID
             </DropdownMenuItem>
             {isOwner && (
-              <DropdownMenuItem
-                onClick={(e) => { e.preventDefault(); setStripBadge((s) => !s); }}
-                className="cursor-pointer"
-              >
+              <DropdownMenuItem onClick={(e) => { e.preventDefault(); setStripBadge((s) => !s); }} className="cursor-pointer">
                 <Sparkles className="w-4 h-4 mr-2" />
                 Badge on export: <span className={`ml-auto font-mono text-xs ${stripBadge ? "text-destructive" : "text-primary"}`}>{stripBadge ? "OFF" : "ON"}</span>
               </DropdownMenuItem>
             )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setLocation("/privacy")} className="cursor-pointer text-xs text-muted-foreground">
+              Privacy
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setLocation("/terms")} className="cursor-pointer text-xs text-muted-foreground">
+              Terms
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={signOut} className="cursor-pointer text-destructive focus:text-destructive">
               <LogOut className="w-4 h-4 mr-2" /> Sign out
@@ -408,7 +440,7 @@ export default function Dashboard() {
 
       <div className="px-6 flex-1 flex flex-col min-h-[300px] pb-6">
         <TemplatesPicker onSelect={(p) => setPrompt(p)} />
-        
+
         <div className="relative group flex-1 flex flex-col">
           <div className="absolute -inset-0.5 bg-gradient-to-r from-primary/30 to-primary/0 rounded-xl blur opacity-30 group-focus-within:opacity-100 transition duration-500"></div>
           <div className="relative flex-1 flex flex-col bg-card border border-border/50 rounded-xl overflow-hidden focus-within:border-primary/50 focus-within:neon-border transition-all duration-300">
@@ -419,7 +451,6 @@ export default function Dashboard() {
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleGenerate(); } }}
             />
-            
             <div className="p-3 bg-card/50 border-t border-border/30 flex items-center justify-between mt-auto">
               <div className="flex items-center gap-2">
                 <TooltipProvider>
@@ -442,9 +473,9 @@ export default function Dashboard() {
                   </Tooltip>
                 </TooltipProvider>
               </div>
-              
-              <Button 
-                onClick={() => handleGenerate()} 
+
+              <Button
+                onClick={() => handleGenerate()}
                 disabled={!prompt.trim() || status === "thinking" || status === "streaming"}
                 className="bg-primary text-primary-foreground hover:bg-primary/90 font-medium rounded-full px-6 shadow-[0_0_15px_rgba(0,255,255,0.3)] hover:shadow-[0_0_25px_rgba(0,255,255,0.5)] transition-all"
               >
@@ -492,7 +523,26 @@ export default function Dashboard() {
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => user ? setShowSave(true) : toast({ title: "Sign in required" })} disabled={!htmlContent}>
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={html.undo} disabled={!html.canUndo}>
+              <Undo2 className="w-4 h-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Undo (⌘Z)</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={html.redo} disabled={!html.canRedo}>
+              <Redo2 className="w-4 h-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Redo (⌘⇧Z)</TooltipContent>
+        </Tooltip>
+
+        <div className="w-px h-4 bg-border/50 mx-1 hidden sm:block" />
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => user ? setShowSave(true) : (toast({ title: "Sign in required" }), signIn())} disabled={!htmlContent}>
               <Save className="w-4 h-4" />
             </Button>
           </TooltipTrigger>
@@ -504,11 +554,11 @@ export default function Dashboard() {
             <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={handleMagicWand} disabled={!htmlContent}>
               <div className="relative">
                 <Wand2 className="w-4 h-4" />
-                {tier === "starter" && <Lock className="w-2.5 h-2.5 absolute -top-1 -right-1 text-primary" />}
+                {!isPaid && <Lock className="w-2.5 h-2.5 absolute -top-1 -right-1 text-primary" />}
               </div>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Magic Wand (Premium)</TooltipContent>
+          <TooltipContent>Magic Wand (Pro)</TooltipContent>
         </Tooltip>
 
         <Tooltip>
@@ -516,11 +566,11 @@ export default function Dashboard() {
             <Button variant="ghost" size="icon" className={`h-8 w-8 ${showSeo ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground"}`} onClick={() => requirePremium(() => setShowSeo(!showSeo))} disabled={!htmlContent}>
               <div className="relative">
                 <Search className="w-4 h-4" />
-                {tier === "starter" && <Lock className="w-2.5 h-2.5 absolute -top-1 -right-1 text-primary" />}
+                {!isPaid && <Lock className="w-2.5 h-2.5 absolute -top-1 -right-1 text-primary" />}
               </div>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>SEO Master (Premium)</TooltipContent>
+          <TooltipContent>SEO Master (Pro)</TooltipContent>
         </Tooltip>
 
         <Tooltip>
@@ -528,11 +578,11 @@ export default function Dashboard() {
             <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => requirePremium(() => setShowPromote(true))} disabled={!htmlContent || !currentProjectTitle}>
               <div className="relative">
                 <Megaphone className="w-4 h-4" />
-                {tier === "starter" && <Lock className="w-2.5 h-2.5 absolute -top-1 -right-1 text-primary" />}
+                {!isPaid && <Lock className="w-2.5 h-2.5 absolute -top-1 -right-1 text-primary" />}
               </div>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{!currentProjectTitle ? "Save project first to Promote" : "Promote Kit (Premium)"}</TooltipContent>
+          <TooltipContent>{!currentProjectTitle ? "Save first to Promote" : "Promote Kit (Pro)"}</TooltipContent>
         </Tooltip>
 
         <Tooltip>
@@ -542,7 +592,7 @@ export default function Dashboard() {
               size="icon"
               className={`h-8 w-8 ${currentSharedSlug ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
               onClick={() => {
-                if (!user) { toast({ title: "Sign in required", description: "Sign in to share your project." }); return; }
+                if (!user) { toast({ title: "Sign in required" }); signIn(); return; }
                 if (!currentProjectId) { toast({ title: "Save first", description: "Save the project to share a public link." }); return; }
                 setShowShare(true);
               }}
@@ -554,7 +604,7 @@ export default function Dashboard() {
               </div>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{currentSharedSlug ? "Public link active" : !currentProjectId ? "Save project first to Share" : "Share public link"}</TooltipContent>
+          <TooltipContent>{currentSharedSlug ? "Public link active" : !currentProjectId ? "Save first to Share" : "Share public link"}</TooltipContent>
         </Tooltip>
 
         <div className="w-px h-4 bg-border/50 mx-1 hidden sm:block" />
@@ -565,36 +615,38 @@ export default function Dashboard() {
         <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground hidden sm:inline-flex" onClick={copyCode} disabled={!htmlContent} title="Copy">
           <Copy className="w-4 h-4" />
         </Button>
-        
+
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={handleDownload} disabled={!htmlContent || isZipping}>
               <div className="relative">
                 {isZipping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                {tier === "starter" && <span className="absolute -top-1 -right-1 text-[8px] bg-primary text-primary-foreground px-1 rounded-sm leading-none">ZIP</span>}
+                {!user
+                  ? <Lock className="w-2.5 h-2.5 absolute -top-1 -right-1 text-primary" />
+                  : !canDownload && <span className="absolute -top-1 -right-1 text-[8px] bg-primary text-primary-foreground px-1 rounded-sm leading-none">PRO</span>}
               </div>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Download (ZIP for Premium)</TooltipContent>
+          <TooltipContent>{!user ? "Sign in to download" : canDownload ? "Download production ZIP" : "Sign-in HTML download • Pro for ZIP"}</TooltipContent>
         </Tooltip>
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => requireAuthAndPremium(() => setShowVercel(true))} disabled={!htmlContent}>
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={handleDeploy} disabled={!htmlContent}>
               <div className="relative">
-                <svg className="w-4 h-4" viewBox="0 0 76 65" fill="currentColor"><path d="M37.5274 0L75.0548 65H0L37.5274 0Z"/></svg>
-                {tier === "starter" && <Lock className="w-2.5 h-2.5 absolute -top-1 -right-1 text-primary" />}
+                <Rocket className="w-4 h-4" />
+                {!isPaid && <Lock className="w-2.5 h-2.5 absolute -top-1 -right-1 text-primary" />}
               </div>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Deploy to Vercel (Billionaire)</TooltipContent>
+          <TooltipContent>Deploy to Vercel/Netlify (Pro)</TooltipContent>
         </Tooltip>
       </TooltipProvider>
     </>
   );
 
   const PreviewPane = () => (
-    <div className="flex-1 flex flex-col relative bg-[#0a0a0a] overflow-hidden">
+    <div className="flex-1 flex flex-col relative bg-[hsl(var(--background))] overflow-hidden">
       {!isMobile && <div className="absolute left-0 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-primary/50 to-transparent opacity-50" />}
 
       {(status === "thinking" || status === "streaming") && (
@@ -629,7 +681,7 @@ export default function Dashboard() {
               ))}
             </div>
           )}
-          
+
           {isMobile ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -648,7 +700,7 @@ export default function Dashboard() {
       <div className="flex-1 relative overflow-hidden flex flex-row">
         <div className="flex-1 flex flex-col relative">
           <div className="flex-1 flex justify-center items-start overflow-auto p-4 md:p-8">
-            <motion.div 
+            <motion.div
               layout
               className={`relative bg-white rounded-xl overflow-hidden transition-all duration-500 shadow-2xl ring-1 ring-border/50 ${status === "streaming" ? "ring-primary/50 shadow-[0_0_30px_rgba(0,255,255,0.15)]" : ""} ${!htmlContent ? "bg-transparent ring-0 shadow-none" : ""}`}
               style={{ width: "100%", maxWidth: isMobile ? "100%" : (deviceWidth === "mobile" ? "390px" : deviceWidth === "tablet" ? "768px" : "100%"), height: "100%" }}
@@ -661,7 +713,7 @@ export default function Dashboard() {
                 sandbox="allow-scripts"
                 title="Preview"
               />
-              {!htmlContent && (
+              {!htmlContent && status !== "thinking" && status !== "streaming" && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-background to-background/50 border border-border/20 rounded-xl pointer-events-none">
                   <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center text-center">
                     <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-6 neon-border">
@@ -672,23 +724,28 @@ export default function Dashboard() {
                   </motion.div>
                 </div>
               )}
-              {status === "thinking" && !htmlContent && (
+              {(status === "thinking" || (status === "streaming" && !htmlContent)) && (
                 <div className="absolute inset-0 flex items-center justify-center bg-background/40 backdrop-blur-sm rounded-xl pointer-events-none">
-                  <div className="flex items-center gap-3 px-5 py-2.5 rounded-full border border-primary/30 bg-background/80 text-sm text-primary shadow-[0_0_20px_rgba(0,255,255,0.25)]">
-                    <Loader2 className="w-4 h-4 animate-spin" /> Booting up Gemini
-                  </div>
+                  <LoadingSteps active={true} streaming={status === "streaming"} />
                 </div>
               )}
             </motion.div>
           </div>
 
+          {/* Magic Refine — pinned bottom-center, only when there's content */}
+          <MagicRefine
+            hasContent={!!htmlContent}
+            busy={status === "thinking" || status === "streaming"}
+            onRefine={handleRefine}
+          />
+
           <AnimatePresence>
             {showCode && !isMobile && (
-              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "40%", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="border-t border-border/50 bg-[#0d0d0d] overflow-hidden flex flex-col shrink-0">
+              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "40%", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="border-t border-border/50 bg-[hsl(var(--card))] overflow-hidden flex flex-col shrink-0">
                 <div className="h-8 bg-secondary/30 border-b border-border/30 flex items-center px-4 text-xs font-mono text-muted-foreground shrink-0">
                   <TerminalSquare className="w-3.5 h-3.5 mr-2" /> generated.html
                 </div>
-                <div className="flex-1 overflow-auto p-4 text-xs font-mono leading-relaxed text-gray-300">
+                <div className="flex-1 overflow-auto p-4 text-xs font-mono leading-relaxed text-muted-foreground">
                   <pre className="m-0 whitespace-pre-wrap break-all"><code>{htmlContent || "/* Awaiting generation... */"}</code></pre>
                   <div ref={codeEndRef} />
                 </div>
@@ -697,7 +754,6 @@ export default function Dashboard() {
           </AnimatePresence>
         </div>
 
-        {/* SEO Sidebar */}
         <AnimatePresence>
           {showSeo && !isMobile && (
             <motion.div initial={{ width: 0, opacity: 0 }} animate={{ width: 320, opacity: 1 }} exit={{ width: 0, opacity: 0 }} className="overflow-hidden">
@@ -712,7 +768,7 @@ export default function Dashboard() {
   return (
     <div className="h-[100dvh] w-full bg-background text-foreground selection:bg-primary/30 flex flex-col md:flex-row overflow-hidden">
       {AuthNav()}
-      
+
       {isMobile ? (
         <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col w-full">
           <div className="flex-1 overflow-hidden">
@@ -738,12 +794,19 @@ export default function Dashboard() {
 
       {/* Modals */}
       <PricingModal open={showPricing} onOpenChange={setShowPricing} />
-      <VercelDeployModal open={showVercel} onOpenChange={setShowVercel} html={htmlContent} title={currentProjectTitle} />
-      <SaveProjectModal 
-        open={showSave} 
-        onOpenChange={setShowSave} 
-        html={htmlContent} 
-        prompt={lastPrompt || prompt} 
+      <DeployModal
+        open={showDeploy}
+        onOpenChange={setShowDeploy}
+        html={htmlContent}
+        title={currentProjectTitle}
+        prompt={lastPrompt || prompt}
+        stripBadge={isOwner && stripBadge}
+      />
+      <SaveProjectModal
+        open={showSave}
+        onOpenChange={setShowSave}
+        html={htmlContent}
+        prompt={lastPrompt || prompt}
         currentProjectId={currentProjectId}
         currentTitle={currentProjectTitle}
         onSaved={(id, title) => { setCurrentProjectId(id); setCurrentProjectTitle(title); }}

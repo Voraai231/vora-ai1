@@ -10,8 +10,13 @@ import {
   getTotalProjects,
   getTotalSharedProjects,
   getAllProjects,
+  getDailyActiveUsers,
+  getPopularPromptWords,
+  getRevenueSummary,
   AdminProjectRow,
   OwnerConfig,
+  PromptWord,
+  RevenueSummary,
 } from "@/lib/admin";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +24,8 @@ import { VoraIcon } from "@/components/VoraIcon";
 import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Loader2, Users, FolderKanban, Globe, ShieldCheck,
-  ExternalLink, AlertTriangle, KeyRound, Search, Lock,
+  ExternalLink, AlertTriangle, KeyRound, Search, Lock, Activity,
+  TrendingUp, Hash, DollarSign, Crown, Eye,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatDistanceToNow } from "date-fns";
@@ -28,6 +34,7 @@ interface Stats {
   users: number;
   projects: number;
   shares: number;
+  dau: number;
 }
 
 function toJsDate(value: any): Date | null {
@@ -39,22 +46,21 @@ function toJsDate(value: any): Date | null {
 
 export default function Admin() {
   const { user, loading: authLoading, signIn } = useAuth();
-  const { isOwner, isSuperAdmin, checked: ownerChecked, superAdminConfigured } = useIsOwner();
+  const { isOwner, isSuperAdmin, isEmailOwner, checked: ownerChecked, superAdminConfigured } = useIsOwner();
   const { toast } = useToast();
 
   const [ownerConfig, setOwnerConfig] = useState<OwnerConfig | null>(null);
   const [configLoading, setConfigLoading] = useState(true);
   const [stats, setStats] = useState<Stats | null>(null);
   const [projects, setProjects] = useState<AdminProjectRow[]>([]);
+  const [popular, setPopular] = useState<PromptWord[]>([]);
+  const [revenue, setRevenue] = useState<RevenueSummary | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<AdminProjectRow | null>(null);
 
   useEffect(() => {
-    if (!hasFirebaseConfig) {
-      setConfigLoading(false);
-      return;
-    }
+    if (!hasFirebaseConfig) { setConfigLoading(false); return; }
     let cancelled = false;
     getOwnerConfig()
       .then((cfg) => { if (!cancelled) setOwnerConfig(cfg); })
@@ -67,11 +73,21 @@ export default function Admin() {
     if (!isOwner) return;
     let cancelled = false;
     setDataLoading(true);
-    Promise.all([getTotalUsers(), getTotalProjects(), getTotalSharedProjects(), getAllProjects(200)])
-      .then(([u, p, s, list]) => {
+    Promise.all([
+      getTotalUsers(),
+      getTotalProjects(),
+      getTotalSharedProjects(),
+      getDailyActiveUsers(24),
+      getAllProjects(200),
+      getPopularPromptWords(12),
+      getRevenueSummary(),
+    ])
+      .then(([u, p, s, dau, list, words, rev]) => {
         if (cancelled) return;
-        setStats({ users: u, projects: p, shares: s });
+        setStats({ users: u, projects: p, shares: s, dau });
         setProjects(list);
+        setPopular(words);
+        setRevenue(rev);
       })
       .catch((err) => {
         console.error(err);
@@ -95,13 +111,8 @@ export default function Admin() {
 
   const handleClaim = async () => {
     if (!user) return;
-    // If a super admin UID is hardcoded, only that UID may claim.
     if (superAdminConfigured && !isSuperAdmin) {
-      toast({
-        title: "Locked deployment",
-        description: "This Vora deployment is hard-locked to a different super admin UID. Sign in with the correct account.",
-        variant: "destructive",
-      });
+      toast({ title: "Locked deployment", description: "This Vora deployment is hard-locked to a different super admin UID. Sign in with the correct account.", variant: "destructive" });
       return;
     }
     try {
@@ -138,7 +149,6 @@ export default function Admin() {
     );
   }
 
-  // Super admin always wins, even with no Firestore claim yet.
   if (!isOwner && !ownerConfig) {
     return (
       <CenteredFrame>
@@ -180,6 +190,8 @@ export default function Admin() {
     );
   }
 
+  const maxPopular = popular[0]?.count || 1;
+
   return (
     <div className="min-h-[100dvh] bg-background">
       <header className="h-16 border-b border-border/30 px-6 flex items-center justify-between sticky top-0 bg-background/80 backdrop-blur-xl z-20">
@@ -202,6 +214,11 @@ export default function Admin() {
               <Lock className="w-3.5 h-3.5" /> SUPER ADMIN
             </div>
           )}
+          {isEmailOwner && !isSuperAdmin && (
+            <div className="flex items-center gap-2 px-3 py-1 rounded-full border border-amber-400/40 bg-amber-400/10 text-xs font-semibold text-amber-300">
+              <Lock className="w-3.5 h-3.5" /> EMAIL-LOCKED OWNER
+            </div>
+          )}
           <div className="flex items-center gap-2 px-3 py-1 rounded-full border border-primary/30 bg-primary/10 text-xs font-semibold text-primary">
             <ShieldCheck className="w-3.5 h-3.5" />
             OWNER
@@ -210,15 +227,126 @@ export default function Admin() {
       </header>
 
       <main className="p-6 md:p-10 max-w-7xl mx-auto space-y-8">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* Top metric grid */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard icon={<Users className="w-5 h-5" />} label="Total users" value={stats?.users} loading={dataLoading} />
-          <StatCard icon={<FolderKanban className="w-5 h-5" />} label="Total projects" value={stats?.projects} loading={dataLoading} />
+          <StatCard icon={<Activity className="w-5 h-5" />} label="Active (24h)" value={stats?.dau} loading={dataLoading} highlight />
+          <StatCard icon={<FolderKanban className="w-5 h-5" />} label="Projects" value={stats?.projects} loading={dataLoading} />
           <StatCard icon={<Globe className="w-5 h-5" />} label="Public shares" value={stats?.shares} loading={dataLoading} />
         </div>
 
+        {/* Revenue + Popular prompts */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Revenue */}
+          <section className="lg:col-span-2 rounded-2xl border border-border/50 bg-card p-6">
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center text-primary neon-border">
+                  <DollarSign className="w-4 h-4" />
+                </div>
+                <h2 className="text-lg font-bold">Revenue</h2>
+              </div>
+              {revenue && (
+                <div className="text-right">
+                  <div className="text-3xl font-bold tracking-tight tabular-nums text-primary">
+                    ${revenue.total.toLocaleString()}
+                  </div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">MRR + Lifetime cash</div>
+                </div>
+              )}
+            </div>
+
+            {dataLoading && !revenue ? (
+              <div className="py-8 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
+            ) : revenue ? (
+              <>
+                <div className="grid grid-cols-2 gap-3 mb-5">
+                  <div className="rounded-lg border border-border/50 bg-secondary/20 p-3">
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Pro · MRR</div>
+                    <div className="text-2xl font-bold mt-1">${revenue.estimatedMrr.toLocaleString()}<span className="text-sm text-muted-foreground font-normal">/mo</span></div>
+                    <div className="text-xs text-muted-foreground mt-1">{revenue.proCount} active subscription{revenue.proCount === 1 ? "" : "s"}</div>
+                  </div>
+                  <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3">
+                    <div className="text-[10px] uppercase tracking-wider text-yellow-300 font-semibold flex items-center gap-1"><Crown className="w-3 h-3" /> Lifetime</div>
+                    <div className="text-2xl font-bold mt-1">${revenue.estimatedLtv.toLocaleString()}</div>
+                    <div className="text-xs text-muted-foreground mt-1">{revenue.lifetimeCount} customer{revenue.lifetimeCount === 1 ? "" : "s"}</div>
+                  </div>
+                </div>
+
+                {revenue.recent.length === 0 ? (
+                  <div className="text-xs text-muted-foreground border border-dashed border-border/40 rounded-lg p-4 text-center">
+                    No payments recorded yet. License keys you activate will appear here.
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Recent activations</div>
+                    {revenue.recent.map((r, i) => {
+                      const d = toJsDate(r.validatedAt);
+                      return (
+                        <div key={i} className="flex items-center justify-between text-xs px-3 py-2 rounded-lg bg-secondary/20 border border-border/30">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${r.tier === "billionaire" ? "bg-yellow-500/15 text-yellow-300" : "bg-primary/15 text-primary"}`}>
+                              {r.tier === "billionaire" ? "Lifetime" : "Pro"}
+                            </span>
+                            <span className="truncate">{r.email || r.uid.slice(0, 12)}</span>
+                          </div>
+                          <span className="text-muted-foreground shrink-0 ml-2">{d ? formatDistanceToNow(d, { addSuffix: true }) : "—"}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            ) : null}
+          </section>
+
+          {/* Popular prompts */}
+          <section className="rounded-2xl border border-border/50 bg-card p-6">
+            <div className="flex items-center gap-2 mb-5">
+              <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center text-primary neon-border">
+                <TrendingUp className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold">Popular prompts</h2>
+                <p className="text-[11px] text-muted-foreground">Most-used keywords across all users</p>
+              </div>
+            </div>
+            {dataLoading && popular.length === 0 ? (
+              <div className="py-8 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
+            ) : popular.length === 0 ? (
+              <div className="text-xs text-muted-foreground border border-dashed border-border/40 rounded-lg p-4 text-center">
+                Not enough data yet.
+              </div>
+            ) : (
+              <ol className="space-y-2">
+                {popular.map((w, i) => (
+                  <li key={w.word} className="text-xs">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-mono text-foreground/85"><Hash className="w-3 h-3 inline -mt-0.5 mr-0.5 text-muted-foreground" />{w.word}</span>
+                      <span className="text-muted-foreground tabular-nums">{w.count}</span>
+                    </div>
+                    <div className="h-1 bg-secondary/40 rounded-full overflow-hidden">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${(w.count / maxPopular) * 100}%` }}
+                        transition={{ delay: i * 0.04 }}
+                        className="h-full bg-gradient-to-r from-primary to-primary/40 rounded-full"
+                      />
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        </div>
+
+        {/* Projects gallery */}
         <section>
           <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
-            <h2 className="text-xl font-bold">All projects</h2>
+            <div>
+              <h2 className="text-xl font-bold">All projects</h2>
+              <p className="text-xs text-muted-foreground">Click any card to view it as the user sees it</p>
+            </div>
             <div className="relative w-full sm:w-72">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -231,9 +359,7 @@ export default function Admin() {
           </div>
 
           {dataLoading && projects.length === 0 ? (
-            <div className="py-20 flex items-center justify-center">
-              <Loader2 className="w-6 h-6 animate-spin text-primary" />
-            </div>
+            <div className="py-20 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
           ) : filtered.length === 0 ? (
             <div className="py-20 text-center text-muted-foreground border border-dashed border-border/50 rounded-xl">
               No projects yet.
@@ -259,11 +385,16 @@ export default function Admin() {
                       title={p.title}
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
-                    {p.sharedSlug && (
-                      <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-background/80 backdrop-blur-sm border border-primary/40 text-[10px] font-semibold uppercase tracking-wider text-primary">
-                        <Globe className="w-3 h-3" /> Public
+                    <div className="absolute top-2 right-2 flex items-center gap-1.5">
+                      {p.sharedSlug && (
+                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-background/80 backdrop-blur-sm border border-primary/40 text-[10px] font-semibold uppercase tracking-wider text-primary">
+                          <Globe className="w-3 h-3" /> Public
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-background/80 backdrop-blur-sm border border-border/40 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Eye className="w-3 h-3" /> View as user
                       </div>
-                    )}
+                    </div>
                   </div>
                   <div className="p-3 flex-1 flex flex-col">
                     <h3 className="font-bold text-sm truncate">{p.title}</h3>
@@ -288,10 +419,7 @@ export default function Admin() {
       </main>
 
       {selected && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 md:p-10"
-          onClick={() => setSelected(null)}
-        >
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 md:p-10" onClick={() => setSelected(null)}>
           <motion.div
             initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -299,9 +427,12 @@ export default function Admin() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="h-14 border-b border-border/30 px-4 flex items-center justify-between shrink-0 bg-background/80 backdrop-blur-xl">
-              <div className="min-w-0">
+              <div className="min-w-0 flex items-center gap-2">
+                <div className="px-2 py-0.5 rounded-md bg-fuchsia-500/15 text-fuchsia-300 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                  <Eye className="w-3 h-3" /> Impersonating
+                </div>
                 <div className="font-semibold truncate">{selected.title}</div>
-                <div className="text-xs text-muted-foreground truncate">{selected.ownerUid}</div>
+                <div className="text-xs text-muted-foreground truncate font-mono">{selected.ownerUid}</div>
               </div>
               <div className="flex items-center gap-2">
                 {selected.sharedSlug && (
@@ -330,10 +461,10 @@ export default function Admin() {
   );
 }
 
-function StatCard({ icon, label, value, loading }: { icon: React.ReactNode; label: string; value: number | undefined; loading: boolean }) {
+function StatCard({ icon, label, value, loading, highlight }: { icon: React.ReactNode; label: string; value: number | undefined; loading: boolean; highlight?: boolean }) {
   return (
-    <div className="rounded-xl border border-border/50 bg-card p-5 flex items-center gap-4 hover:border-primary/40 transition-colors">
-      <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center text-primary neon-border">
+    <div className={`rounded-xl border bg-card p-5 flex items-center gap-4 transition-colors ${highlight ? "border-primary/40 shadow-[0_0_20px_rgba(0,255,255,0.12)]" : "border-border/50 hover:border-primary/40"}`}>
+      <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${highlight ? "bg-primary/15 text-primary neon-border" : "bg-primary/10 text-primary neon-border"}`}>
         {icon}
       </div>
       <div className="min-w-0">
@@ -348,9 +479,7 @@ function StatCard({ icon, label, value, loading }: { icon: React.ReactNode; labe
 
 function CenteredFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-[100dvh] bg-background flex flex-col items-center justify-center p-6 text-center">
-      {children}
-    </div>
+    <div className="min-h-[100dvh] bg-background flex flex-col items-center justify-center p-6 text-center">{children}</div>
   );
 }
 
