@@ -30,15 +30,58 @@ import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsMobile } from "@/hooks/use-mobile";
 
-const SYSTEM_PROMPT = `You are Vora AI, an expert frontend engineer. You generate beautiful, fully self-contained HTML documents using Tailwind CSS via the CDN.
-Rules:
-1. Output ONLY the raw HTML string. No markdown code blocks (no \`\`\`html), no commentary, no explanations.
-2. The HTML must include: <script src="https://cdn.tailwindcss.com"></script> in the head.
-3. Make the design premium, modern, and beautiful. Use thoughtful spacing, typography, and colors.
-4. Default to a dark theme if not specified, but respect whatever the user asks.
-5. Provide a complete, valid document structure (<html>, <head>, <body>).
-6. Do NOT include any external resources that might fail to load (use simple placeholder images from unpkg or placehold.co if needed).
-7. Ensure the result is fully responsive.`;
+const SYSTEM_PROMPT = `You are Vora AI, an elite frontend engineer that outputs production-quality websites.
+
+OUTPUT CONTRACT — NON-NEGOTIABLE:
+- Respond with a single complete HTML document and NOTHING ELSE.
+- The very first character of your response MUST be "<" (start of <!DOCTYPE html>).
+- The very last character MUST be ">" (end of </html>).
+- DO NOT wrap output in markdown fences (no \`\`\`, no \`\`\`html).
+- DO NOT include any prose, commentary, greetings, explanations, apologies, or notes — before, after, or inside the HTML.
+- DO NOT say "Here is" or "Sure" or anything similar.
+
+DOCUMENT REQUIREMENTS:
+1. Start with <!DOCTYPE html> then <html lang="en"> and a complete <head> and <body>.
+2. The <head> MUST include, in this order:
+   - <meta charset="UTF-8">
+   - <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   - <title>...</title>
+   - <script src="https://cdn.tailwindcss.com"></script>
+   - <link rel="preconnect" href="https://fonts.googleapis.com"> and a Google Fonts <link> for Inter (or another tasteful font).
+3. Use Tailwind utility classes only — do NOT write custom <style> blocks unless absolutely required for animations.
+4. Default theme: rich dark background (slate-950 / zinc-950), high contrast typography, generous spacing, subtle gradients, and a premium feel. Respect the user if they ask for light or a specific palette.
+5. The page MUST be fully responsive (mobile-first, breakpoints at sm/md/lg).
+6. Use only inline SVGs or images from https://placehold.co/<w>x<h>/<bg>/<fg>?text=... — no other external image hosts.
+7. If JavaScript is needed, include it inline in a <script> tag at the end of <body>. Keep it self-contained.
+8. The result must render correctly inside an iframe with sandbox="allow-scripts" — no top-level navigation, no parent access.
+
+Remember: raw HTML only. Your entire response is fed directly into an iframe srcdoc.`;
+
+function sanitizeHtml(raw: string): string {
+  let html = raw.trim();
+  // Strip markdown code fences if the model still adds them
+  html = html.replace(/^```(?:html|HTML)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+  // Trim leading conversational lines until we hit a tag
+  const firstAngle = html.indexOf("<");
+  if (firstAngle > 0) html = html.slice(firstAngle);
+  // Trim trailing junk after the final tag
+  const lastAngle = html.lastIndexOf(">");
+  if (lastAngle !== -1 && lastAngle < html.length - 1) html = html.slice(0, lastAngle + 1);
+  if (!html) return html;
+  const lower = html.toLowerCase();
+  // If model returned only a fragment, wrap it
+  if (!lower.includes("<html")) {
+    html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Vora Preview</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-slate-950 text-white">${html}</body></html>`;
+  } else if (!lower.includes("cdn.tailwindcss.com")) {
+    // Inject Tailwind CDN if missing
+    if (lower.includes("</head>")) {
+      html = html.replace(/<\/head>/i, '<script src="https://cdn.tailwindcss.com"></script></head>');
+    } else if (lower.includes("<body")) {
+      html = html.replace(/<body([^>]*)>/i, '<head><script src="https://cdn.tailwindcss.com"></script></head><body$1>');
+    }
+  }
+  return html;
+}
 
 export default function Dashboard() {
   const [prompt, setPrompt] = useState("");
@@ -148,16 +191,20 @@ export default function Dashboard() {
       const ai = new GoogleGenAI({ apiKey });
       const responseStream = await ai.models.generateContentStream({
         model: "gemini-2.5-flash",
-        systemInstruction: sysPrompt,
         contents: [{ role: "user", parts: [{ text: currentPrompt }] }],
+        config: {
+          systemInstruction: sysPrompt,
+          temperature: 0.7,
+          responseMimeType: "text/plain",
+        },
       });
 
       let fullText = "";
       let firstChunk = true;
       
       for await (const chunk of responseStream) {
-        fullText += chunk.text;
-        const cleanHtml = fullText.replace(/^```html\n?/, "").replace(/```$/, "");
+        fullText += chunk.text ?? "";
+        const cleanHtml = sanitizeHtml(fullText);
         if (firstChunk) {
           setStatus("streaming");
           firstChunk = false;
@@ -168,7 +215,8 @@ export default function Dashboard() {
       setStatus("idle");
       setTranscript("");
 
-      const finalHtml = fullText.replace(/^```html\n?/, "").replace(/```$/, "");
+      const finalHtml = sanitizeHtml(fullText);
+      if (finalHtml) setHtmlContent(finalHtml);
       if (sysPrompt === SYSTEM_PROMPT && finalHtml) {
         void autoSave(finalHtml, currentPrompt);
       }
