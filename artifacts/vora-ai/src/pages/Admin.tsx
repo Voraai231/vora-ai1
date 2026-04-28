@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
+import { useIsOwner } from "@/hooks/useIsOwner";
 import { hasFirebaseConfig } from "@/lib/firebase";
 import {
   getOwnerConfig,
@@ -18,7 +19,7 @@ import { VoraIcon } from "@/components/VoraIcon";
 import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Loader2, Users, FolderKanban, Globe, ShieldCheck,
-  ExternalLink, AlertTriangle, KeyRound, Search,
+  ExternalLink, AlertTriangle, KeyRound, Search, Lock,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatDistanceToNow } from "date-fns";
@@ -38,6 +39,7 @@ function toJsDate(value: any): Date | null {
 
 export default function Admin() {
   const { user, loading: authLoading, signIn } = useAuth();
+  const { isOwner, isSuperAdmin, checked: ownerChecked, superAdminConfigured } = useIsOwner();
   const { toast } = useToast();
 
   const [ownerConfig, setOwnerConfig] = useState<OwnerConfig | null>(null);
@@ -47,8 +49,6 @@ export default function Admin() {
   const [dataLoading, setDataLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<AdminProjectRow | null>(null);
-
-  const isOwner = !!user && !!ownerConfig && ownerConfig.ownerUid === user.uid;
 
   useEffect(() => {
     if (!hasFirebaseConfig) {
@@ -95,6 +95,15 @@ export default function Admin() {
 
   const handleClaim = async () => {
     if (!user) return;
+    // If a super admin UID is hardcoded, only that UID may claim.
+    if (superAdminConfigured && !isSuperAdmin) {
+      toast({
+        title: "Locked deployment",
+        description: "This Vora deployment is hard-locked to a different super admin UID. Sign in with the correct account.",
+        variant: "destructive",
+      });
+      return;
+    }
     try {
       const cfg = await claimOwnership(user);
       setOwnerConfig(cfg);
@@ -105,7 +114,7 @@ export default function Admin() {
     }
   };
 
-  if (configLoading || authLoading) {
+  if (configLoading || authLoading || !ownerChecked) {
     return (
       <div className="min-h-[100dvh] bg-background flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -129,7 +138,8 @@ export default function Admin() {
     );
   }
 
-  if (!ownerConfig) {
+  // Super admin always wins, even with no Firestore claim yet.
+  if (!isOwner && !ownerConfig) {
     return (
       <CenteredFrame>
         <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-6 neon-border">
@@ -137,7 +147,12 @@ export default function Admin() {
         </div>
         <h1 className="text-3xl font-bold mb-3">Claim ownership</h1>
         <p className="text-muted-foreground mb-2 max-w-md">No owner is set on this Vora deployment yet.</p>
-        <p className="text-muted-foreground mb-8 max-w-md text-sm">Claim ownership to lock the admin panel to your account ({user.email}).</p>
+        <p className="text-muted-foreground mb-2 max-w-md text-sm">Claim ownership to lock the admin panel to your account ({user.email}).</p>
+        {superAdminConfigured && (
+          <p className="text-xs text-amber-400/80 mb-6 max-w-md flex items-center gap-1.5 justify-center">
+            <Lock className="w-3.5 h-3.5" /> This deployment is hard-locked via VITE_OWNER_UID — only the configured super-admin UID may claim.
+          </p>
+        )}
         <Button onClick={handleClaim} size="lg" className="bg-primary text-primary-foreground hover:bg-primary/90 font-medium rounded-full px-8 shadow-[0_0_15px_rgba(0,255,255,0.3)]">
           <ShieldCheck className="w-5 h-5 mr-2" />
           Claim this deployment
@@ -154,9 +169,12 @@ export default function Admin() {
           <AlertTriangle className="w-8 h-8 text-destructive" />
         </div>
         <h1 className="text-3xl font-bold mb-3">Access denied</h1>
-        <p className="text-muted-foreground mb-8 max-w-md">
-          This deployment is owned by another account ({ownerConfig.ownerEmail || "—"}). Sign in with the owner account to continue.
+        <p className="text-muted-foreground mb-2 max-w-md">
+          {superAdminConfigured
+            ? "This deployment is locked to a hard-coded super-admin UID. You are not authorized."
+            : `This deployment is owned by another account (${ownerConfig?.ownerEmail || "—"}). Sign in with the owner account to continue.`}
         </p>
+        <p className="text-xs text-muted-foreground/60 max-w-md font-mono break-all">your uid: {user.uid}</p>
         <BackToBuilder />
       </CenteredFrame>
     );
@@ -178,9 +196,16 @@ export default function Admin() {
             Owner Console
           </div>
         </div>
-        <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full border border-primary/30 bg-primary/10 text-xs font-semibold text-primary">
-          <ShieldCheck className="w-3.5 h-3.5" />
-          OWNER
+        <div className="hidden sm:flex items-center gap-2">
+          {isSuperAdmin && (
+            <div className="flex items-center gap-2 px-3 py-1 rounded-full border border-fuchsia-400/30 bg-fuchsia-400/10 text-xs font-semibold text-fuchsia-300">
+              <Lock className="w-3.5 h-3.5" /> SUPER ADMIN
+            </div>
+          )}
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full border border-primary/30 bg-primary/10 text-xs font-semibold text-primary">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            OWNER
+          </div>
         </div>
       </header>
 

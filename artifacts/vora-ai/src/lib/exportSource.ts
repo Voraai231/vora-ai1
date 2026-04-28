@@ -1,17 +1,46 @@
 /**
  * Splits a single-file generated HTML document into a real
- * source-tree (index.html + styles.css + script.js + README.md +
- * package.json + vercel.json) and injects the "Built with Vora AI"
- * badge unless the caller is the Owner who has stripped it.
+ * source-tree (index.html + styles.css + script.js + assets/* +
+ * README.md + package.json + vercel.json) and injects the
+ * "Built with Vora AI" badge unless the caller is the Owner who
+ * has stripped it.
  */
 
 const BADGE_MARK = "data-vora-badge";
+
+const MIME_EXT: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/svg+xml": "svg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/x-icon": "ico",
+  "image/vnd.microsoft.icon": "ico",
+  "font/woff": "woff",
+  "font/woff2": "woff2",
+  "font/ttf": "ttf",
+  "application/font-woff": "woff",
+  "application/font-woff2": "woff2",
+  "application/octet-stream": "bin",
+};
+
+function mimeToExt(mime: string): string {
+  return MIME_EXT[mime.toLowerCase()] || "bin";
+}
 
 function escapeForCss(s: string): string {
   return s.replace(/<\/style>/gi, "<\\/style>");
 }
 function escapeForJs(s: string): string {
   return s.replace(/<\/script>/gi, "<\\/script>");
+}
+
+export interface ExtractedAsset {
+  /** Filename (relative to assets/), e.g. "asset-1.png" */
+  name: string;
+  /** Base64 payload (without "data:..." prefix). */
+  base64: string;
 }
 
 function buildBadgeSnippet(): { style: string; html: string } {
@@ -34,6 +63,59 @@ Built with Vora AI
   return { style, html };
 }
 
+/**
+ * Walks the document and rewrites every base64 data URI it finds
+ * (in src=, href=, srcset=, and CSS url(...) values) to a relative
+ * `./assets/asset-N.<ext>` path. Returns the rewritten document plus
+ * the list of binary assets to write into the ZIP.
+ */
+function extractDataUris(input: string): { html: string; assets: ExtractedAsset[] } {
+  const assets: ExtractedAsset[] = [];
+  let counter = 0;
+
+  const handle = (uri: string): string => {
+    const m = uri.match(/^data:([^;,]+)?(;base64)?,([\s\S]*)$/i);
+    if (!m) return uri;
+    const isBase64 = !!m[2];
+    if (!isBase64) return uri; // leave URL-encoded data URIs in place
+    const mime = (m[1] || "application/octet-stream").trim();
+    const ext = mimeToExt(mime);
+    counter += 1;
+    const name = `asset-${counter}.${ext}`;
+    assets.push({ name, base64: m[3].replace(/\s+/g, "") });
+    return `./assets/${name}`;
+  };
+
+  let html = input;
+
+  // src="data:…" / href="data:…"
+  html = html.replace(/\b(src|href|poster)\s*=\s*(["'])(data:[^"']+)\2/gi, (_m, attr, q, uri) => {
+    return `${attr}=${q}${handle(uri)}${q}`;
+  });
+
+  // srcset="data:… 1x, data:… 2x" — handle each candidate
+  html = html.replace(/\bsrcset\s*=\s*(["'])([^"']*data:[^"']+)\1/gi, (_m, q, value) => {
+    const rewritten = value
+      .split(",")
+      .map((part: string) => {
+        const trimmed = part.trim();
+        const spaceIdx = trimmed.search(/\s/);
+        const url = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
+        const desc = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx);
+        return url.startsWith("data:") ? `${handle(url)}${desc}` : trimmed;
+      })
+      .join(", ");
+    return `srcset=${q}${rewritten}${q}`;
+  });
+
+  // CSS url(data:…) — both inline style and <style> blocks
+  html = html.replace(/url\(\s*(["']?)(data:[^)"']+)\1\s*\)/gi, (_m, _q, uri) => {
+    return `url(${handle(uri)})`;
+  });
+
+  return { html, assets };
+}
+
 export interface SplitProject {
   indexHtml: string;
   stylesCss: string;
@@ -41,12 +123,13 @@ export interface SplitProject {
   readmeMd: string;
   packageJson: string;
   vercelJson: string;
+  assets: ExtractedAsset[];
 }
 
 export interface SplitOptions {
   title: string;
   prompt: string;
-  /** When true, the viral badge is NOT injected. Only available to Owner. */
+  /** When true, the viral badge is NOT injected. Owner-only. */
   stripBadge?: boolean;
 }
 
@@ -54,27 +137,28 @@ export function splitProject(rawHtml: string, opts: SplitOptions): SplitProject 
   const title = (opts.title || "Vora Project").trim();
   const safeName = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "vora-project";
 
-  let html = rawHtml || "";
+  // 1) Pull out base64 binary assets first (so they don't bloat .html / .css)
+  const { html: htmlNoData, assets } = extractDataUris(rawHtml || "");
+  let html = htmlNoData;
 
-  // Extract every <style>…</style> block into styles.css
+  // 2) Extract every <style>…</style> block into styles.css
   const styles: string[] = [];
   html = html.replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gi, (_m, css: string) => {
     styles.push(css.trim());
     return "";
   });
 
-  // Extract every <script> block that isn't a CDN or external src
+  // 3) Extract every inline <script> block into script.js (preserve external src=)
   const scripts: string[] = [];
   html = html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (_m, attrs: string, body: string) => {
     if (/\bsrc\s*=/.test(attrs)) {
-      // External script — keep it inline (e.g. Tailwind CDN, Alpine, etc.)
       return `<script${attrs}>${body}</script>`;
     }
     if (body.trim()) scripts.push(body.trim());
     return "";
   });
 
-  // Inject viral badge for non-owner exports
+  // 4) Build viral badge for non-owner exports
   let badgeStyle = "";
   let badgeHtml = "";
   if (!opts.stripBadge) {
@@ -86,7 +170,7 @@ export function splitProject(rawHtml: string, opts: SplitOptions): SplitProject 
   const combinedCss = [badgeStyle.trim(), ...styles].filter(Boolean).join("\n\n");
   const combinedJs = scripts.join("\n\n;\n");
 
-  // Re-link styles.css and script.js into <head>/end of <body>
+  // 5) Re-link styles.css and script.js
   const linkTag = combinedCss ? `<link rel="stylesheet" href="./styles.css" />` : "";
   const scriptTag = combinedJs ? `<script src="./script.js" defer></script>` : "";
 
@@ -110,6 +194,10 @@ export function splitProject(rawHtml: string, opts: SplitOptions): SplitProject 
   const stylesCss = combinedCss ? escapeForCss(combinedCss) + "\n" : "";
   const scriptJs = combinedJs ? escapeForJs(combinedJs) + "\n" : "";
 
+  const assetLines = assets.length
+    ? assets.map((a) => `│   ├── ${a.name}`).join("\n")
+    : `│   └── (empty)`;
+
   const readmeMd = [
     `# ${title}`,
     "",
@@ -128,6 +216,8 @@ export function splitProject(rawHtml: string, opts: SplitOptions): SplitProject 
     `├── index.html      # Markup (Tailwind via CDN)`,
     stylesCss ? `├── styles.css     # Extracted page styles` : "",
     scriptJs ? `├── script.js      # Page interactivity` : "",
+    `├── assets/         # Extracted binary assets (images, fonts)`,
+    assetLines,
     `├── package.json    # NPM metadata`,
     `├── vercel.json     # Vercel config (clean URLs)`,
     `└── README.md`,
@@ -155,7 +245,7 @@ export function splitProject(rawHtml: string, opts: SplitOptions): SplitProject 
       name: safeName,
       version: "1.0.0",
       private: true,
-      description: `Built with Vora AI — ${opts.prompt?.slice(0, 80) ?? ""}`.trim(),
+      description: `Built with Vora AI — ${(opts.prompt || "").slice(0, 80)}`.trim(),
       scripts: {
         start: "npx serve .",
         deploy: "vercel --prod",
@@ -183,5 +273,5 @@ export function splitProject(rawHtml: string, opts: SplitOptions): SplitProject 
     2
   );
 
-  return { indexHtml, stylesCss, scriptJs, readmeMd, packageJson, vercelJson };
+  return { indexHtml, stylesCss, scriptJs, readmeMd, packageJson, vercelJson, assets };
 }

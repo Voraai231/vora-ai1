@@ -40,7 +40,11 @@ export function useZipExport() {
         ".gitignore",
         ["node_modules", ".vercel", ".DS_Store", "*.log"].join("\n") + "\n"
       );
-      root.folder("assets");
+
+      const assetsFolder = root.folder("assets")!;
+      for (const asset of project.assets) {
+        assetsFolder.file(asset.name, asset.base64, { base64: true });
+      }
 
       const blob = await zip.generateAsync({ type: "blob" });
       saveAs(blob, `${folder}.zip`);
