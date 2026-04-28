@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useTier } from "@/hooks/useTier";
 import { getProject, saveProject, updateProject, getLatestProject } from "@/lib/projects";
 import { useZipExport } from "@/hooks/useZipExport";
+import { useIsOwner } from "@/hooks/useIsOwner";
 import { VoraIcon } from "@/components/VoraIcon";
 import { TemplatesPicker } from "@/components/TemplatesPicker";
 import { PricingModal } from "@/components/PricingModal";
@@ -113,6 +114,8 @@ export default function Dashboard() {
   const { user, signIn, signOut } = useAuth();
   const { tier } = useTier();
   const { exportZip, isExporting: isZipping } = useZipExport();
+  const { isOwner } = useIsOwner();
+  const [stripBadge, setStripBadge] = useState(false);
   const isMobile = useIsMobile();
   const [location, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState("compose");
@@ -282,8 +285,12 @@ export default function Dashboard() {
   };
 
   const handleDownload = () => {
-    if (tier !== "starter") {
-      exportZip(htmlContent, lastPrompt, currentProjectTitle);
+    // Owner OR any premium user gets the full source-tree ZIP.
+    // Owner is the only one who may strip the "Built with Vora AI" badge.
+    if (isOwner || tier !== "starter") {
+      exportZip(htmlContent, lastPrompt, currentProjectTitle, {
+        stripBadge: isOwner && stripBadge,
+      });
     } else {
       const blob = new Blob([htmlContent], { type: "text/html" });
       const url = URL.createObjectURL(blob);
@@ -292,6 +299,16 @@ export default function Dashboard() {
       a.download = `${currentProjectTitle || "vora"}.html`;
       a.click();
       URL.revokeObjectURL(url);
+    }
+  };
+
+  const copyMyUid = async () => {
+    if (!user) return;
+    try {
+      await navigator.clipboard.writeText(user.uid);
+      toast({ title: "User ID copied", description: "Set VITE_OWNER_UID to lock owner access." });
+    } catch {
+      toast({ title: user.uid });
     }
   };
 
@@ -333,9 +350,23 @@ export default function Dashboard() {
             <DropdownMenuItem onClick={() => setShowPricing(true)} className="cursor-pointer text-primary">
               <Crown className="w-4 h-4 mr-2" /> Plan: {tier.toUpperCase()}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setLocation("/admin")} className="cursor-pointer">
-              <ShieldCheck className="w-4 h-4 mr-2" /> Owner Console
+            {isOwner && (
+              <DropdownMenuItem onClick={() => setLocation("/admin")} className="cursor-pointer text-primary">
+                <ShieldCheck className="w-4 h-4 mr-2" /> Owner Console
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onClick={copyMyUid} className="cursor-pointer text-xs text-muted-foreground">
+              <Code className="w-3.5 h-3.5 mr-2" /> Copy my User ID
             </DropdownMenuItem>
+            {isOwner && (
+              <DropdownMenuItem
+                onClick={(e) => { e.preventDefault(); setStripBadge((s) => !s); }}
+                className="cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4 mr-2" />
+                Badge on export: <span className={`ml-auto font-mono text-xs ${stripBadge ? "text-destructive" : "text-primary"}`}>{stripBadge ? "OFF" : "ON"}</span>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={signOut} className="cursor-pointer text-destructive focus:text-destructive">
               <LogOut className="w-4 h-4 mr-2" /> Sign out

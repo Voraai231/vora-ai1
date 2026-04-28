@@ -1,22 +1,49 @@
 import { useState } from "react";
 import { saveAs } from "file-saver";
 import JSZip from "jszip";
+import { splitProject } from "@/lib/exportSource";
+
+export interface ExportOptions {
+  /** When true, the "Built with Vora AI" badge is omitted (Owner-only). */
+  stripBadge?: boolean;
+}
 
 export function useZipExport() {
   const [isExporting, setIsExporting] = useState(false);
 
-  const exportZip = async (html: string, prompt: string, title: string) => {
+  const exportZip = async (
+    html: string,
+    prompt: string,
+    title: string,
+    options: ExportOptions = {}
+  ) => {
     try {
       setIsExporting(true);
+      const safeTitle = (title || "vora-project").trim();
+      const folder = safeTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "vora-project";
+
+      const project = splitProject(html, {
+        title: safeTitle,
+        prompt,
+        stripBadge: options.stripBadge,
+      });
+
       const zip = new JSZip();
-      
-      zip.file("index.html", html);
-      zip.file("README.md", `# Built with Vora AI\n\nPrompt: ${prompt}\n`);
-      zip.file("vercel.json", JSON.stringify({ cleanUrls: true, trailingSlash: false }, null, 2));
-      zip.file("package.json", JSON.stringify({ name: title.toLowerCase().replace(/\s+/g, '-'), version: "1.0.0", private: true }, null, 2));
-      
+      const root = zip.folder(folder)!;
+      root.file("index.html", project.indexHtml);
+      if (project.stylesCss) root.file("styles.css", project.stylesCss);
+      if (project.scriptJs) root.file("script.js", project.scriptJs);
+      root.file("README.md", project.readmeMd);
+      root.file("package.json", project.packageJson);
+      root.file("vercel.json", project.vercelJson);
+      root.file(
+        ".gitignore",
+        ["node_modules", ".vercel", ".DS_Store", "*.log"].join("\n") + "\n"
+      );
+      root.folder("assets");
+
       const blob = await zip.generateAsync({ type: "blob" });
-      saveAs(blob, `${title || 'vora-project'}.zip`);
+      saveAs(blob, `${folder}.zip`);
     } catch (err) {
       console.error("Export failed", err);
       throw err;

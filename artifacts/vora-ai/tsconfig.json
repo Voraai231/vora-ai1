@@ -11,6 +11,7 @@
     "moduleResolution": "bundler",
     "noImplicitAny": false,
     "skipLibCheck": true,
+    "strict": false,
     "types": ["node", "vite/client"],
     "paths": {
       "@/*": ["./src/*"]
