@@ -7,6 +7,7 @@ import Dashboard from "@/pages/Dashboard";
 import Projects from "@/pages/Projects";
 import SharedProject from "@/pages/SharedProject";
 import Admin from "@/pages/Admin";
+import ContentStudio from "@/pages/ContentStudio";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -22,6 +23,7 @@ function App() {
               <Route path="/projects" component={Projects} />
               <Route path="/p/:slug" component={SharedProject} />
               <Route path="/admin" component={Admin} />
+              <Route path="/studio" component={ContentStudio} />
               <Route component={NotFound} />
             </Switch>
           </WouterRouter>

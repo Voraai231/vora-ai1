@@ -1,5 +1,9 @@
 import { db, hasFirebaseConfig } from "@/lib/firebase";
-import { collection, collectionGroup, doc, getCountFromServer, getDoc, getDocs, query, orderBy, limit, setDoc, serverTimestamp, Timestamp } from "firebase/firestore";
+import {
+  collection, collectionGroup, doc, getCountFromServer, getDoc,
+  getDocs, query, orderBy, limit, setDoc, deleteDoc,
+  serverTimestamp, Timestamp,
+} from "firebase/firestore";
 import { User } from "firebase/auth";
 
 export interface AdminProjectRow {
@@ -17,6 +21,19 @@ export interface OwnerConfig {
   ownerUid: string;
   ownerEmail: string;
   claimedAt: Timestamp | Date;
+}
+
+export interface AnalyticsCounters {
+  page_view?: number;
+  generation_started?: number;
+  generation_complete?: number;
+  project_saved?: number;
+  user_signed_in?: number;
+  export_zip?: number;
+  export_vercel?: number;
+  content_studio_used?: number;
+  magic_wand_used?: number;
+  seo_master_used?: number;
 }
 
 const CONFIG_PATH = ["meta", "config"] as const;
@@ -47,7 +64,7 @@ export async function getTotalUsers(): Promise<number> {
   return snapshot.data().count;
 }
 
-export async function getAllProjects(max = 100): Promise<AdminProjectRow[]> {
+export async function getAllProjects(max = 200): Promise<AdminProjectRow[]> {
   if (!hasFirebaseConfig) return [];
   const q = query(collectionGroup(db, "projects"), orderBy("updatedAt", "desc"), limit(max));
   const snapshot = await getDocs(q);
@@ -77,4 +94,20 @@ export async function getTotalSharedProjects(): Promise<number> {
   if (!hasFirebaseConfig) return 0;
   const snapshot = await getCountFromServer(collection(db, "sharedProjects"));
   return snapshot.data().count;
+}
+
+export async function adminDeleteProject(ownerUid: string, projectId: string): Promise<void> {
+  if (!hasFirebaseConfig) throw new Error("Firebase not configured");
+  await deleteDoc(doc(db, "users", ownerUid, "projects", projectId));
+}
+
+export async function getAnalyticsCounters(): Promise<AnalyticsCounters> {
+  if (!hasFirebaseConfig) return {};
+  try {
+    const snapshot = await getDoc(doc(db, "analytics", "counters"));
+    if (!snapshot.exists()) return {};
+    return snapshot.data() as AnalyticsCounters;
+  } catch {
+    return {};
+  }
 }

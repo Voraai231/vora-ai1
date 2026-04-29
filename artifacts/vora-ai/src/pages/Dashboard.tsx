@@ -19,8 +19,9 @@ import {
   Mic, Loader2, Sparkles, Code, Copy, Download, RefreshCw, 
   Smartphone, Tablet, Monitor, TerminalSquare, AlertTriangle,
   Wand2, Search, Megaphone, Crown, LogIn, Lock, MoreVertical,
-  Save, Folder, LogOut, Link2, ShieldCheck, Cloud, CheckCircle2
+  Save, Folder, LogOut, Link2, ShieldCheck, Cloud, CheckCircle2, Clapperboard
 } from "lucide-react";
+import { trackEvent } from "@/lib/analytics";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -184,8 +185,9 @@ export default function Dashboard() {
 
     setStatus("thinking");
     setErrorMessage("");
-    if (sysPrompt === SYSTEM_PROMPT) setLastPrompt(currentPrompt); // Don't override last prompt on auto-fixes
+    if (sysPrompt === SYSTEM_PROMPT) setLastPrompt(currentPrompt);
     if (isMobile) setActiveTab("preview");
+    void trackEvent("generation_started", { uid: user?.uid });
 
     try {
       const ai = new GoogleGenAI({ apiKey });
@@ -214,6 +216,7 @@ export default function Dashboard() {
       
       setStatus("idle");
       setTranscript("");
+      void trackEvent("generation_complete", { uid: user?.uid });
 
       const finalHtml = sanitizeHtml(fullText);
       if (finalHtml) setHtmlContent(finalHtml);
@@ -232,6 +235,7 @@ export default function Dashboard() {
       setShowPricing(true);
       return;
     }
+    void trackEvent("magic_wand_used", { uid: user?.uid });
     const fixPrompt = "You are a senior frontend engineer. Audit this HTML for UI bugs (broken layouts, accessibility issues, contrast problems, mobile breakage, missing alt text, unclosed tags, broken Tailwind classes, missing meta tags) and return a FIXED full HTML document. Output only raw HTML, no commentary, no markdown fences.\n\nHTML to fix:\n" + htmlContent;
     handleGenerate(fixPrompt, "Return ONLY raw HTML. Fix all issues.");
     toast({ title: "Magic Wand activated", description: "Fixing layout and accessibility issues..." });
@@ -303,6 +307,9 @@ export default function Dashboard() {
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setShowPricing(true)} className="cursor-pointer text-primary">
               <Crown className="w-4 h-4 mr-2" /> Plan: {tier.toUpperCase()}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setLocation("/studio")} className="cursor-pointer">
+              <Clapperboard className="w-4 h-4 mr-2" /> Content Studio
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setLocation("/admin")} className="cursor-pointer">
               <ShieldCheck className="w-4 h-4 mr-2" /> Owner Console
