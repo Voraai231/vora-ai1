@@ -49,7 +49,26 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
-    sourcemap: false, // <-- YE LINE ADD KARNI HAI
+    sourcemap: false,
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-react": ["react", "react-dom"],
+          "vendor-firebase": ["firebase/app", "firebase/auth", "firebase/firestore"],
+          "vendor-ui": [
+            "@radix-ui/react-tooltip",
+            "@radix-ui/react-avatar",
+            "@radix-ui/react-dropdown-menu",
+            "@radix-ui/react-dialog",
+            "@radix-ui/react-tabs",
+            "@radix-ui/react-select",
+          ],
+          "vendor-motion": ["framer-motion"],
+          "vendor-ai": ["@google/genai"],
+        },
+      },
+    },
   },
   server: {
     port,
