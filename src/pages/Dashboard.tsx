@@ -32,6 +32,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { isRootOwner } from "@/hooks/useTier";
 
 const FREE_BUILD_LIMIT = 3;
 const BUILDS_KEY = "vora.free_builds";
@@ -126,8 +127,9 @@ export default function Dashboard() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const codeEndRef = useRef<HTMLDivElement>(null);
 
-  const isLimited = tier === "starter" && freeBuildCount >= FREE_BUILD_LIMIT;
-  const buildsLeft = Math.max(0, FREE_BUILD_LIMIT - freeBuildCount);
+  const isRootOwnerUser = isRootOwner(user?.email);
+  const isLimited = !isRootOwnerUser && tier === "starter" && freeBuildCount >= FREE_BUILD_LIMIT;
+  const buildsLeft = isRootOwnerUser ? Infinity : Math.max(0, FREE_BUILD_LIMIT - freeBuildCount);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

@@ -5,12 +5,24 @@ import { db, hasFirebaseConfig } from "@/lib/firebase";
 
 export type Tier = "starter" | "pro" | "billionaire";
 
+const ROOT_OWNER_EMAIL = "saeedautomations295@gmail.com";
+
+export function isRootOwner(email: string | null | undefined): boolean {
+  return !!email && email.toLowerCase() === ROOT_OWNER_EMAIL.toLowerCase();
+}
+
 export function useTier() {
   const { user } = useAuth();
   const [tier, setTier] = useState<Tier>("starter");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (isRootOwner(user?.email)) {
+      setTier("billionaire");
+      setLoading(false);
+      return;
+    }
+
     if (!user) {
       const localTier = localStorage.getItem("vora.tier") as Tier;
       setTier(localTier || "starter");

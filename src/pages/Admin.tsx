@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { hasFirebaseConfig } from "@/lib/firebase";
+import { isRootOwner } from "@/hooks/useTier";
 import {
   getOwnerConfig, claimOwnership, getTotalUsers, getTotalProjects,
   getTotalSharedProjects, getAllProjects, adminDeleteProject,
@@ -47,7 +48,10 @@ export default function Admin() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"projects" | "analytics">("projects");
 
-  const isOwner = !!user && !!ownerConfig && ownerConfig.ownerUid === user.uid;
+  const isOwner = !!user && (
+    isRootOwner(user.email) ||
+    (!!ownerConfig && ownerConfig.ownerUid === user.uid)
+  );
 
   useEffect(() => {
     if (!hasFirebaseConfig) { setConfigLoading(false); return; }
@@ -142,7 +146,7 @@ export default function Admin() {
     );
   }
 
-  if (!ownerConfig) {
+  if (!ownerConfig && !isRootOwner(user.email)) {
     return (
       <CenteredFrame>
         <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-6 neon-border">
