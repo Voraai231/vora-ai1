@@ -10,8 +10,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "start": "vite preview --port 3000 --host"
   },
+  "dependencies": {
   "dependencies": {
     "@google/genai": "^1.50.1",
     "@hookform/resolvers": "^3.10.0",
@@ -80,8 +82,11 @@
     "tailwindcss": "^4.1.14",
     "typescript": "^5.9.2",
     "vite": "^7.3.2"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": ["@firebase/util", "esbuild", "protobufjs"]
+"pnpm": {
+    "onlyBuiltDependencies": [
+      "@firebase/util",
+      "esbuild",
+      "protobufjs"
+    ]
   }
 }
