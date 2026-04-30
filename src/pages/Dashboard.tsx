@@ -31,6 +31,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const FREE_BUILD_LIMIT = 3;
 const BUILDS_KEY = "vora.free_builds";
@@ -318,18 +319,21 @@ export default function Dashboard() {
     <div className="w-full md:w-[400px] lg:w-[480px] h-full border-r border-border/50 flex flex-col relative z-10 bg-background/80 backdrop-blur-xl shrink-0">
       {/* Header row — logo + auth always in same line */}
       <div className="h-14 px-4 flex items-center justify-between shrink-0 border-b border-border/30 md:border-0">
-        <div className="flex items-center gap-2.5">
-          <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center neon-border">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center neon-border shrink-0">
             <VoraIcon className="w-5 h-5 text-primary" />
           </div>
-          <span className="font-bold text-lg tracking-tight">Vora AI</span>
+          <span className="font-bold text-lg tracking-tight shrink-0">Vora AI</span>
           {currentProjectTitle && (
-            <span className="hidden sm:inline px-2 py-0.5 bg-secondary text-xs rounded-md truncate max-w-[120px]">
+            <span className="hidden sm:inline px-2 py-0.5 bg-secondary text-xs rounded-md truncate max-w-[100px]">
               {currentProjectTitle}
             </span>
           )}
         </div>
-        <UserMenu />
+        <div className="flex items-center gap-1 shrink-0">
+          <ThemeToggle />
+          <UserMenu />
+        </div>
       </div>
 
       {/* Headline — hidden on mobile to save space */}
