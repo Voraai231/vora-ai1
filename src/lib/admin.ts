@@ -1,7 +1,7 @@
 import { db, hasFirebaseConfig } from "@/lib/firebase";
 import {
   collection, collectionGroup, doc, getCountFromServer, getDoc,
-  getDocs, query, orderBy, limit, setDoc, deleteDoc,
+  getDocs, query, limit, setDoc, deleteDoc,
   serverTimestamp, Timestamp,
 } from "firebase/firestore";
 import { User } from "firebase/auth";
@@ -66,9 +66,10 @@ export async function getTotalUsers(): Promise<number> {
 
 export async function getAllProjects(max = 200): Promise<AdminProjectRow[]> {
   if (!hasFirebaseConfig) return [];
-  const q = query(collectionGroup(db, "projects"), orderBy("updatedAt", "desc"), limit(max));
+  // No orderBy — avoids composite index requirement. Sort client-side instead.
+  const q = query(collectionGroup(db, "projects"), limit(max));
   const snapshot = await getDocs(q);
-  return snapshot.docs.map((d) => {
+  const rows = snapshot.docs.map((d) => {
     const data = d.data() as any;
     const ownerUid = d.ref.parent.parent?.id || "unknown";
     return {
@@ -81,6 +82,25 @@ export async function getAllProjects(max = 200): Promise<AdminProjectRow[]> {
       createdAt: data.createdAt || null,
       sharedSlug: data.sharedSlug || null,
     };
+  });
+
+  // Client-side sort by updatedAt descending
+  return rows.sort((a, b) => {
+    const aTime = a.updatedAt instanceof Timestamp
+      ? a.updatedAt.toMillis()
+      : a.updatedAt instanceof Date
+      ? a.updatedAt.getTime()
+      : typeof a.updatedAt === "number"
+      ? a.updatedAt
+      : 0;
+    const bTime = b.updatedAt instanceof Timestamp
+      ? b.updatedAt.toMillis()
+      : b.updatedAt instanceof Date
+      ? b.updatedAt.getTime()
+      : typeof b.updatedAt === "number"
+      ? b.updatedAt
+      : 0;
+    return bTime - aTime;
   });
 }
 
