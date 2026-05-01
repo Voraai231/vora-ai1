@@ -399,6 +399,43 @@ export default function Admin() {
               </ol>
             </div>
 
+            <div className="p-5 rounded-xl border border-purple-500/30 bg-purple-500/5">
+              <h3 className="font-bold text-purple-400 flex items-center gap-2 mb-2">
+                <Search className="w-4 h-4" /> Google Search Console — URL Indexing
+              </h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Apne live (public) projects ko Google mein index karwao. Har Live project ka URL neeche copy karo aur Google Search Console mein "URL Inspection" tool mein paste karo.
+              </p>
+              {projects.filter(p => !!p.sharedSlug).length === 0 ? (
+                <p className="text-xs text-muted-foreground italic">Koi bhi Live project nahi hai abhi. Kisi project ko "Share" karo pehle.</p>
+              ) : (
+                <div className="space-y-2">
+                  {projects.filter(p => !!p.sharedSlug).map(p => {
+                    const url = `${window.location.origin}/p/${p.sharedSlug}`;
+                    return (
+                      <div key={p.id} className="flex items-center gap-2 p-2.5 rounded-lg bg-background/60 border border-border/40">
+                        <span className="w-2 h-2 rounded-full bg-green-400 shrink-0 animate-pulse" />
+                        <span className="flex-1 font-semibold text-sm truncate">{p.title}</span>
+                        <span className="font-mono text-xs text-muted-foreground hidden md:block truncate max-w-[200px]">{url}</span>
+                        <a
+                          href={`https://search.google.com/search-console/inspect?resource_id=${encodeURIComponent(window.location.origin)}&url=${encodeURIComponent(url)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 border border-purple-500/30 transition-colors"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink className="w-3 h-3" /> Request Index
+                        </a>
+                      </div>
+                    );
+                  })}
+                  <p className="text-xs text-muted-foreground mt-3 pt-3 border-t border-border/30">
+                    "Request Index" button Search Console kholta hai. Wahan "Request Indexing" dabao. Pehli baar Search Console mein apni site add karni hogi: <a href="https://search.google.com/search-console" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">search.google.com/search-console</a>
+                  </p>
+                </div>
+              )}
+            </div>
+
             <div className="p-5 rounded-xl border border-border/40 bg-card">
               <h3 className="font-bold mb-3 flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-primary" /> App Info
@@ -435,7 +472,12 @@ export default function Admin() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="pl-9 bg-secondary/30 border-border/50"
+                  data-testid="input-search-projects"
                 />
+              </div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="w-2 h-2 rounded-full bg-green-400 inline-block" /> Live = Public shared
+                <span className="w-2 h-2 rounded-full bg-yellow-400 inline-block ml-2" /> Draft = Not shared
               </div>
             </div>
 
@@ -448,65 +490,94 @@ export default function Admin() {
                 No projects found.
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filtered.map((p, i) => (
-                  <motion.div
-                    key={`${p.ownerUid}-${p.id}`}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: Math.min(i * 0.02, 0.3) }}
-                    className="group text-left rounded-xl border border-border/50 bg-card overflow-hidden hover:border-primary/50 hover:neon-border transition-all flex flex-col"
-                  >
-                    <button type="button" onClick={() => setSelected(p)} className="text-left">
-                      <div className="h-32 bg-white relative overflow-hidden pointer-events-none select-none border-b border-border/30">
-                        <iframe
-                          srcDoc={p.html}
-                          sandbox="allow-scripts"
-                          className="w-[200%] h-[200%] origin-top-left scale-50 border-0"
-                          tabIndex={-1}
-                          title={p.title}
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
-                        {p.sharedSlug && (
-                          <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-background/80 backdrop-blur-sm border border-primary/40 text-[10px] font-semibold uppercase tracking-wider text-primary">
-                            <Globe className="w-3 h-3" /> Public
-                          </div>
-                        )}
-                      </div>
-                      <div className="p-3 flex-1 flex flex-col">
-                        <h3 className="font-bold text-sm truncate">{p.title}</h3>
-                        <p className="text-xs text-muted-foreground line-clamp-2 mt-1 flex-1">{p.prompt}</p>
-                        <div className="flex items-center justify-between mt-3 text-[10px] uppercase tracking-wider">
-                          <span className="font-mono text-muted-foreground/80 truncate max-w-[60%]" title={p.ownerUid}>
-                            {p.ownerUid.slice(0, 10)}…
-                          </span>
-                          <span className="text-muted-foreground">
-                            {(() => { const d = toJsDate(p.updatedAt); return d ? formatDistanceToNow(d, { addSuffix: true }) : "—"; })()}
-                          </span>
-                        </div>
-                      </div>
-                    </button>
-                    <div className="px-3 pb-3 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-destructive hover:bg-destructive/10 hover:text-destructive text-xs flex-1"
-                        disabled={deletingId === p.id}
-                        onClick={(e) => handleDelete(p, e)}
-                      >
-                        {deletingId === p.id ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Trash2 className="w-3 h-3 mr-1" />}
-                        Delete
-                      </Button>
-                      {p.sharedSlug && (
-                        <a href={`/p/${p.sharedSlug}`} target="_blank" rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="h-7 px-2 flex items-center gap-1 text-xs rounded-md hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors">
-                          <ExternalLink className="w-3 h-3" /> View
-                        </a>
-                      )}
-                    </div>
-                  </motion.div>
-                ))}
+              <div className="rounded-xl border border-border/50 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-secondary/40 border-b border-border/50">
+                      <th className="text-left px-4 py-3 text-xs uppercase tracking-wider text-muted-foreground font-semibold">Project Title</th>
+                      <th className="text-left px-4 py-3 text-xs uppercase tracking-wider text-muted-foreground font-semibold hidden sm:table-cell">Status</th>
+                      <th className="text-left px-4 py-3 text-xs uppercase tracking-wider text-muted-foreground font-semibold hidden md:table-cell">Owner UID</th>
+                      <th className="text-left px-4 py-3 text-xs uppercase tracking-wider text-muted-foreground font-semibold hidden lg:table-cell">Last Updated</th>
+                      <th className="px-4 py-3 text-xs uppercase tracking-wider text-muted-foreground font-semibold text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/30">
+                    {filtered.map((p, i) => {
+                      const isLive = !!p.sharedSlug;
+                      const updatedDate = toJsDate(p.updatedAt);
+                      return (
+                        <motion.tr
+                          key={`${p.ownerUid}-${p.id}`}
+                          initial={{ opacity: 0, x: -8 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: Math.min(i * 0.02, 0.3) }}
+                          className="group hover:bg-secondary/20 transition-colors cursor-pointer"
+                          onClick={() => setSelected(p)}
+                          data-testid={`row-project-${p.id}`}
+                        >
+                          <td className="px-4 py-3">
+                            <div className="font-semibold text-foreground truncate max-w-[200px]" title={p.title}>
+                              {p.title}
+                            </div>
+                            <div className="text-xs text-muted-foreground line-clamp-1 mt-0.5 max-w-[200px]">
+                              {p.prompt}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 hidden sm:table-cell">
+                            {isLive ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-green-500/15 text-green-400 border border-green-500/30">
+                                <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                                Live
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-yellow-500/15 text-yellow-400 border border-yellow-500/30">
+                                <span className="w-1.5 h-1.5 rounded-full bg-yellow-400" />
+                                Draft
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 hidden md:table-cell">
+                            <span className="font-mono text-xs text-muted-foreground" title={p.ownerUid}>
+                              {p.ownerUid.slice(0, 12)}…
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 hidden lg:table-cell text-xs text-muted-foreground">
+                            {updatedDate ? formatDistanceToNow(updatedDate, { addSuffix: true }) : "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1 justify-end">
+                              {isLive && (
+                                <a
+                                  href={`/p/${p.sharedSlug}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-secondary/60 text-muted-foreground hover:text-primary transition-colors"
+                                  title="View live"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                </a>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                disabled={deletingId === p.id}
+                                onClick={(e) => handleDelete(p, e)}
+                                title="Delete project"
+                                data-testid={`button-delete-${p.id}`}
+                              >
+                                {deletingId === p.id
+                                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  : <Trash2 className="w-3.5 h-3.5" />}
+                              </Button>
+                            </div>
+                          </td>
+                        </motion.tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </section>
