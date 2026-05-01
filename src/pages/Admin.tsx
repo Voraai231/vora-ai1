@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { hasFirebaseConfig } from "@/lib/firebase";
 import { isRootOwner } from "@/hooks/useTier";
 import {
-  getOwnerConfig, claimOwnership, getTotalUsers, getTotalProjects,
+  getOwnerConfig, claimOwnership, initializeOwnerProfile, getTotalUsers, getTotalProjects,
   getTotalSharedProjects, getAllProjects, adminDeleteProject,
   getAnalyticsCounters, AdminProjectRow, OwnerConfig, AnalyticsCounters,
 } from "@/lib/admin";
@@ -114,14 +114,32 @@ export default function Admin() {
   );
 
   useEffect(() => {
-    if (!hasFirebaseConfig) { setConfigLoading(false); return; }
+    if (!hasFirebaseConfig || !user) { setConfigLoading(false); return; }
     let cancelled = false;
-    getOwnerConfig()
-      .then((cfg) => { if (!cancelled) setOwnerConfig(cfg); })
-      .catch(console.error)
-      .finally(() => { if (!cancelled) setConfigLoading(false); });
+
+    const setup = async () => {
+      try {
+        // Always write/update user profile doc so users collection is populated
+        await initializeOwnerProfile(user);
+
+        // Auto-claim ownership for root owner — no manual button needed
+        if (isRootOwner(user.email)) {
+          const cfg = await claimOwnership(user);
+          if (!cancelled) setOwnerConfig(cfg);
+        } else {
+          const cfg = await getOwnerConfig();
+          if (!cancelled) setOwnerConfig(cfg);
+        }
+      } catch (err) {
+        console.error("Admin setup error:", err);
+      } finally {
+        if (!cancelled) setConfigLoading(false);
+      }
+    };
+
+    setup();
     return () => { cancelled = true; };
-  }, []);
+  }, [user]);
 
   const loadData = () => {
     if (!isOwner) return;

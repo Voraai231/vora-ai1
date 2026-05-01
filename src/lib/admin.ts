@@ -58,6 +58,23 @@ export async function claimOwnership(user: User): Promise<OwnerConfig> {
   return data;
 }
 
+// Ensures owner user document exists in Firestore users collection
+export async function initializeOwnerProfile(user: User): Promise<void> {
+  if (!hasFirebaseConfig) return;
+  await setDoc(
+    doc(db, "users", user.uid),
+    {
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName,
+      photoURL: user.photoURL,
+      lastSeenAt: serverTimestamp(),
+      createdAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
 export async function getTotalUsers(): Promise<number> {
   if (!hasFirebaseConfig) return 0;
   const snapshot = await getCountFromServer(collection(db, "users"));
