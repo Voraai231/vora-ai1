@@ -35,6 +35,7 @@ vercel.json     SPA rewrites, pnpm build, dist/ output
 - `/p/:slug` — Shared public project
 - `/admin` — Owner Admin Console
 - `/studio` — AI Content Studio
+- `/learn` — Learning Hub (SEO, YouTube Automation, Vora AI tips)
 
 ## Key Features
 - **ZIP Export** — available to all users, produces index.html + README + vercel.json + package.json
@@ -43,6 +44,17 @@ vercel.json     SPA rewrites, pnpm build, dist/ output
 - **Magic Wand** — AI auto-fix for UI bugs (Pro+)
 - **SEO Master** — AI SEO analysis + fix (Pro+)
 - **Razorpay** — Pro ₹749/mo, Billionaire ₹3,999/mo
+- **AI Chat Bot** — Floating Gemini-powered assistant (bottom-right), helps with HTML/CSS, SEO, YouTube automation
+- **Learning Hub** — `/learn` page with 7 tutorials covering SEO, YouTube Automation, Vora AI tips with real code examples
+- **Admin Setup Guide** — `/admin` Setup tab has Firestore rules to copy-paste into Firebase Console
+
+## Admin Dashboard Notes
+- Root owner email: `saeedautomations295@gmail.com` (hardcoded in `src/hooks/useTier.ts`)
+- If dashboard shows no data: Firestore security rules need updating (copy from Setup tab)
+- `collectionGroup("projects")` query also needs a Firestore composite index on `updatedAt` (desc)
+
+## Key Commands
+- `pnpm run dev` — start dev server on port 5000 (changed from 5173)
 
 ## Environment Variables (all VITE_ prefix)
 - `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_APP_ID`, `VITE_FIREBASE_AUTH_DOMAIN`

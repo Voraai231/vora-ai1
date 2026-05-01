@@ -15,10 +15,68 @@ import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Loader2, Users, FolderKanban, Globe, ShieldCheck,
   ExternalLink, AlertTriangle, KeyRound, Search, Trash2, RefreshCw,
-  BarChart3, Zap, MousePointer, Download, Eye,
+  BarChart3, Zap, MousePointer, Download, Eye, Settings, Copy, CheckCircle,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatDistanceToNow } from "date-fns";
+
+const FIRESTORE_RULES = `rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Users can read/write their own data
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // Projects subcollection
+      match /projects/{projectId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Billing subcollection
+      match /billing/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    // Admin: Owner can read ALL users and projects
+    match /users/{userId} {
+      allow read: if request.auth != null && isOwner();
+      match /projects/{projectId} {
+        allow read, delete: if request.auth != null && isOwner();
+      }
+    }
+
+    // Shared public projects — anyone can read, owner can write
+    match /sharedProjects/{slug} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Analytics — any signed-in user can write counters
+    match /analytics/{docId} {
+      allow read: if request.auth != null && isOwner();
+      allow write: if request.auth != null;
+      match /events/log/{eventId} {
+        allow write: if request.auth != null;
+      }
+    }
+
+    // Owner config (meta/config)
+    match /meta/{docId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && (
+        !exists(/databases/$(database)/documents/meta/config) || isOwner()
+      );
+    }
+
+    // Helper: check if caller is the owner
+    function isOwner() {
+      return exists(/databases/$(database)/documents/meta/config) &&
+        get(/databases/$(database)/documents/meta/config).data.ownerUid == request.auth.uid;
+    }
+  }
+}`;
 
 interface Stats {
   users: number;
@@ -43,10 +101,12 @@ export default function Admin() {
   const [analytics, setAnalytics] = useState<AnalyticsCounters>({});
   const [projects, setProjects] = useState<AdminProjectRow[]>([]);
   const [dataLoading, setDataLoading] = useState(false);
+  const [dataError, setDataError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<AdminProjectRow | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"projects" | "analytics">("projects");
+  const [activeTab, setActiveTab] = useState<"projects" | "analytics" | "setup">("projects");
+  const [copiedRules, setCopiedRules] = useState(false);
 
   const isOwner = !!user && (
     isRootOwner(user.email) ||
@@ -67,6 +127,7 @@ export default function Admin() {
     if (!isOwner) return;
     let cancelled = false;
     setDataLoading(true);
+    setDataError(null);
     Promise.all([
       getTotalUsers(), getTotalProjects(), getTotalSharedProjects(),
       getAllProjects(200), getAnalyticsCounters(),
@@ -79,7 +140,9 @@ export default function Admin() {
       })
       .catch((err) => {
         console.error(err);
-        toast({ title: "Failed to load admin data", description: err?.message, variant: "destructive" });
+        const msg = err?.message || "Unknown error";
+        setDataError(msg);
+        toast({ title: "Data load failed", description: msg, variant: "destructive" });
       })
       .finally(() => { if (!cancelled) setDataLoading(false); });
     return () => { cancelled = true; };
@@ -212,16 +275,36 @@ export default function Admin() {
           <StatCard icon={<Globe className="w-5 h-5" />} label="Public shares" value={stats?.shares} loading={dataLoading} />
         </div>
 
+        {dataError && (
+          <div className="p-4 rounded-xl border border-destructive/40 bg-destructive/10 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm text-destructive">Data load failed</p>
+              <p className="text-xs text-muted-foreground mt-0.5 font-mono break-all">{dataError}</p>
+              <p className="text-xs text-muted-foreground mt-2">
+                This is usually a <strong>Firestore security rules</strong> issue. Go to the <strong>Setup</strong> tab below to see the required rules.
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={loadData} className="shrink-0 text-xs">
+              <RefreshCw className="w-3.5 h-3.5 mr-1" /> Retry
+            </Button>
+          </div>
+        )}
+
         <div className="flex gap-2 border-b border-border/30">
-          {(["projects", "analytics"] as const).map((tab) => (
+          {([
+            { id: "projects", label: <><FolderKanban className="w-4 h-4 inline mr-1.5" />All Projects ({filtered.length})</> },
+            { id: "analytics", label: <><BarChart3 className="w-4 h-4 inline mr-1.5" />Analytics</> },
+            { id: "setup", label: <><Settings className="w-4 h-4 inline mr-1.5" />Setup Guide</> },
+          ] as const).map((tab) => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors capitalize ${
-                activeTab === tab ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === tab.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              {tab === "projects" ? <><FolderKanban className="w-4 h-4 inline mr-1.5" />All Projects ({filtered.length})</> : <><BarChart3 className="w-4 h-4 inline mr-1.5" />Analytics</>}
+              {tab.label}
             </button>
           ))}
         </div>
@@ -239,6 +322,88 @@ export default function Admin() {
               <AnalyticsCard icon={<Users className="w-4 h-4" />} label="Sign-ins" value={analytics.user_signed_in} />
             </div>
             <p className="text-xs text-muted-foreground mt-4">Analytics events are tracked in real-time via Firestore. Refresh to see latest data.</p>
+          </motion.section>
+        )}
+
+        {activeTab === "setup" && (
+          <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            <div className="p-5 rounded-xl border border-amber-500/30 bg-amber-500/5">
+              <h3 className="font-bold text-amber-400 flex items-center gap-2 mb-2">
+                <AlertTriangle className="w-4 h-4" /> Firestore Security Rules — Required Setup
+              </h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Agar admin dashboard mein data nahi aa raha ya permission error aa raha hai, toh yeh rules Firebase Console mein apply karo:
+                <br /><strong className="text-foreground">Firebase Console → Firestore → Rules → Edit → Paste → Publish</strong>
+              </p>
+              <div className="relative rounded-xl overflow-hidden border border-border/40">
+                <div className="flex items-center justify-between px-4 py-2 bg-secondary/60 border-b border-border/40">
+                  <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">firestore.rules</span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(FIRESTORE_RULES);
+                      setCopiedRules(true);
+                      setTimeout(() => setCopiedRules(false), 2000);
+                    }}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {copiedRules ? <CheckCircle className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedRules ? "Copied!" : "Copy Rules"}
+                  </button>
+                </div>
+                <pre className="p-4 overflow-x-auto text-xs font-mono text-foreground/80 bg-background/60 leading-relaxed whitespace-pre">
+                  {FIRESTORE_RULES}
+                </pre>
+              </div>
+            </div>
+
+            <div className="p-5 rounded-xl border border-blue-500/30 bg-blue-500/5">
+              <h3 className="font-bold text-blue-400 mb-3">Step-by-Step Setup</h3>
+              <ol className="space-y-3 text-sm text-muted-foreground">
+                {[
+                  { step: "1", text: "Firebase Console (console.firebase.google.com) khuolo", link: "https://console.firebase.google.com" },
+                  { step: "2", text: "Apna project select karo → Firestore Database → Rules tab" },
+                  { step: "3", text: "Upar di gayi rules copy karke paste karo aur 'Publish' dabao" },
+                  { step: "4", text: "Indexes tab mein: collection group 'projects' pe updatedAt (Descending) index banao" },
+                  { step: "5", text: "Wapas iss page pe aao aur 'Retry' dabao" },
+                ].map((item) => (
+                  <li key={item.step} className="flex items-start gap-3">
+                    <span className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">{item.step}</span>
+                    <span>
+                      {item.text}
+                      {item.link && (
+                        <a href={item.link} target="_blank" rel="noopener noreferrer" className="ml-2 text-primary hover:underline text-xs">
+                          <ExternalLink className="w-3 h-3 inline" /> Open
+                        </a>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            <div className="p-5 rounded-xl border border-border/40 bg-card">
+              <h3 className="font-bold mb-3 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-primary" /> App Info
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <div className="p-3 rounded-lg bg-secondary/30">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Root Owner Email</div>
+                  <div className="font-mono text-xs text-foreground">{user?.email}</div>
+                </div>
+                <div className="p-3 rounded-lg bg-secondary/30">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Firebase Config</div>
+                  <div className="font-mono text-xs text-green-400">✓ Connected</div>
+                </div>
+                <div className="p-3 rounded-lg bg-secondary/30">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Gemini AI</div>
+                  <div className="font-mono text-xs text-green-400">✓ VITE_GEMINI_API_KEY set</div>
+                </div>
+                <div className="p-3 rounded-lg bg-secondary/30">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Razorpay</div>
+                  <div className="font-mono text-xs text-green-400">✓ VITE_RAZORPAY_KEY_ID set</div>
+                </div>
+              </div>
+            </div>
           </motion.section>
         )}
 

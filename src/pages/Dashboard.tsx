@@ -20,7 +20,7 @@ import {
   Smartphone, Tablet, Monitor, TerminalSquare, AlertTriangle,
   Wand2, Search, Megaphone, Crown, LogIn, Lock, MoreVertical,
   Save, Folder, LogOut, Link2, ShieldCheck, Cloud, CheckCircle2,
-  Clapperboard, ChevronRight, Zap, PackageOpen
+  Clapperboard, ChevronRight, Zap, PackageOpen, BookOpen
 } from "lucide-react";
 import { trackEvent } from "@/lib/analytics";
 import { Button } from "@/components/ui/button";
@@ -294,6 +294,9 @@ export default function Dashboard() {
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setLocation("/projects")} className="cursor-pointer">
             <Folder className="w-4 h-4 mr-2" /> My Projects
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setLocation("/learn")} className="cursor-pointer">
+            <BookOpen className="w-4 h-4 mr-2" /> Learning Hub
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setShowPricing(true)} className="cursor-pointer text-primary">
             <Crown className="w-4 h-4 mr-2" /> Plan: {tier.toUpperCase()}

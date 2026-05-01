@@ -9,7 +9,9 @@ import Projects from "@/pages/Projects";
 import SharedProject from "@/pages/SharedProject";
 import Admin from "@/pages/Admin";
 import ContentStudio from "@/pages/ContentStudio";
+import Learn from "@/pages/Learn";
 import NotFound from "@/pages/not-found";
+import { AIChatBot } from "@/components/AIChatBot";
 
 const queryClient = new QueryClient();
 
@@ -26,10 +28,12 @@ function App() {
                 <Route path="/p/:slug" component={SharedProject} />
                 <Route path="/admin" component={Admin} />
                 <Route path="/studio" component={ContentStudio} />
+                <Route path="/learn" component={Learn} />
                 <Route component={NotFound} />
               </Switch>
             </WouterRouter>
             <Toaster />
+            <AIChatBot />
           </TooltipProvider>
         </AuthProvider>
       </ThemeProvider>
