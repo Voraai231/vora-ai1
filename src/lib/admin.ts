@@ -1,7 +1,7 @@
 import { db, hasFirebaseConfig } from "@/lib/firebase";
 import {
-  collection, collectionGroup, doc, getCountFromServer, getDoc,
-  getDocs, query, limit, setDoc, deleteDoc,
+  collection, doc, getCountFromServer, getDoc,
+  getDocs, setDoc, deleteDoc,
   serverTimestamp, Timestamp,
 } from "firebase/firestore";
 import { User } from "firebase/auth";
@@ -64,50 +64,64 @@ export async function getTotalUsers(): Promise<number> {
   return snapshot.data().count;
 }
 
+// No collectionGroup — fetch users first, then each user's projects
+// This avoids any Firestore index requirement entirely
 export async function getAllProjects(max = 200): Promise<AdminProjectRow[]> {
   if (!hasFirebaseConfig) return [];
-  // No orderBy — avoids composite index requirement. Sort client-side instead.
-  const q = query(collectionGroup(db, "projects"), limit(max));
-  const snapshot = await getDocs(q);
-  const rows = snapshot.docs.map((d) => {
-    const data = d.data() as any;
-    const ownerUid = d.ref.parent.parent?.id || "unknown";
-    return {
-      id: d.id,
-      ownerUid,
-      title: data.title || "Untitled",
-      prompt: data.prompt || "",
-      html: data.html || "",
-      updatedAt: data.updatedAt || null,
-      createdAt: data.createdAt || null,
-      sharedSlug: data.sharedSlug || null,
-    };
-  });
 
-  // Client-side sort by updatedAt descending
+  const usersSnap = await getDocs(collection(db, "users"));
+  const rows: AdminProjectRow[] = [];
+
+  for (const userDoc of usersSnap.docs) {
+    if (rows.length >= max) break;
+    const uid = userDoc.id;
+    try {
+      const projSnap = await getDocs(collection(db, "users", uid, "projects"));
+      for (const d of projSnap.docs) {
+        if (rows.length >= max) break;
+        const data = d.data() as any;
+        rows.push({
+          id: d.id,
+          ownerUid: uid,
+          title: data.title || "Untitled",
+          prompt: data.prompt || "",
+          html: data.html || "",
+          updatedAt: data.updatedAt || null,
+          createdAt: data.createdAt || null,
+          sharedSlug: data.sharedSlug || null,
+        });
+      }
+    } catch {
+      // Skip users whose projects we can't read
+    }
+  }
+
+  // Client-side sort newest first
   return rows.sort((a, b) => {
-    const aTime = a.updatedAt instanceof Timestamp
-      ? a.updatedAt.toMillis()
-      : a.updatedAt instanceof Date
-      ? a.updatedAt.getTime()
-      : typeof a.updatedAt === "number"
-      ? a.updatedAt
+    const toMs = (v: any) =>
+      v instanceof Timestamp ? v.toMillis()
+      : v instanceof Date ? v.getTime()
+      : typeof v === "number" ? v
       : 0;
-    const bTime = b.updatedAt instanceof Timestamp
-      ? b.updatedAt.toMillis()
-      : b.updatedAt instanceof Date
-      ? b.updatedAt.getTime()
-      : typeof b.updatedAt === "number"
-      ? b.updatedAt
-      : 0;
-    return bTime - aTime;
+    return toMs(b.updatedAt) - toMs(a.updatedAt);
   });
 }
 
 export async function getTotalProjects(): Promise<number> {
   if (!hasFirebaseConfig) return 0;
-  const snapshot = await getCountFromServer(collectionGroup(db, "projects"));
-  return snapshot.data().count;
+  try {
+    const usersSnap = await getDocs(collection(db, "users"));
+    let total = 0;
+    for (const userDoc of usersSnap.docs) {
+      const snap = await getCountFromServer(
+        collection(db, "users", userDoc.id, "projects")
+      );
+      total += snap.data().count;
+    }
+    return total;
+  } catch {
+    return 0;
+  }
 }
 
 export async function getTotalSharedProjects(): Promise<number> {
