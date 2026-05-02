@@ -2,39 +2,43 @@ import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
+import Dashboard from "@/pages/Dashboard";
+import Projects from "@/pages/Projects";
+import SharedProject from "@/pages/SharedProject";
+import Admin from "@/pages/Admin";
+import ContentStudio from "@/pages/ContentStudio";
+import Learn from "@/pages/Learn";
+import AuthPage from "@/pages/AuthPage";
 import NotFound from "@/pages/not-found";
+import { AIChatBot } from "@/components/AIChatBot";
 
 const queryClient = new QueryClient();
-
-function Home() {
-  return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gray-50">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900">Replit Agent is building...</h1>
-        <p className="mt-2 text-sm text-gray-600">Your app will appear here once it's ready.</p>
-      </div>
-    </div>
-  );
-}
-
-function Router() {
-  return (
-    <Switch>
-      <Route path="/" component={Home} />
-      <Route component={NotFound} />
-    </Switch>
-  );
-}
 
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
-      </TooltipProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <TooltipProvider>
+            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+              <Switch>
+                <Route path="/" component={Dashboard} />
+                <Route path="/auth" component={AuthPage} />
+                <Route path="/projects" component={Projects} />
+                <Route path="/p/:slug" component={SharedProject} />
+                <Route path="/admin" component={Admin} />
+                <Route path="/studio" component={ContentStudio} />
+                <Route path="/learn" component={Learn} />
+                <Route component={NotFound} />
+              </Switch>
+            </WouterRouter>
+            <Toaster />
+            <AIChatBot />
+          </TooltipProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }
