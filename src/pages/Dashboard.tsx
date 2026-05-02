@@ -1,7 +1,14 @@
 import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { createGeminiClient, getKeyMonitorInfo, checkRateLimit, consumeRateSlot, KeySlotInfo } from "@/lib/gemini";
+import {
+  streamWithFallback,
+  getKeyMonitorInfo,
+  getSystemHealth,
+  checkRateLimit,
+  consumeRateSlot,
+  KeySlotInfo,
+} from "@/lib/gemini";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTier } from "@/hooks/useTier";
@@ -16,11 +23,12 @@ import { PromoteModal } from "@/components/PromoteModal";
 import { SEOMaster } from "@/components/SEOMaster";
 import { ShareModal } from "@/components/ShareModal";
 import {
-  Mic, Loader2, Sparkles, Code, Copy, Download, 
+  Mic, Loader2, Sparkles, Code, Copy, Download,
   Smartphone, Tablet, Monitor, TerminalSquare, AlertTriangle,
   Wand2, Search, Megaphone, Crown, LogIn, Lock, MoreVertical,
   Save, Folder, LogOut, Link2, ShieldCheck, Cloud, CheckCircle2,
-  Clapperboard, ChevronRight, Zap, PackageOpen, BookOpen
+  Clapperboard, ChevronRight, Zap, PackageOpen, BookOpen,
+  FileCode2, Globe2, FileSearch, Activity, LayoutTemplate,
 } from "lucide-react";
 import { trackEvent } from "@/lib/analytics";
 import { Button } from "@/components/ui/button";
@@ -69,7 +77,7 @@ HEAD REQUIREMENTS — include ALL of these in exact order:
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","name":"[title]","description":"[description]","url":"https://voraai.app","publisher":{"@type":"Organization","name":"Vora AI","url":"https://voraai.app"}}</script>
 
 DESIGN REQUIREMENTS:
-- Default: rich dark (slate-950/zinc-950), premium feel, Tailwind only (no custom <style> unless animations needed)
+- Default: rich dark (slate-950/zinc-950), premium feel, Tailwind only
 - Fully responsive, mobile-first (sm/md/lg breakpoints)
 - Images: inline SVGs or https://placehold.co/<w>x<h>/<bg>/<fg>?text=... only
 - JavaScript: inline <script> at end of <body>, self-contained
@@ -77,7 +85,7 @@ DESIGN REQUIREMENTS:
 
 Remember: raw HTML only. Your entire response is the srcdoc of an iframe.`;
 
-// ─── Code Rain Canvas Animation ────────────────────────────────────────────
+// ─── Code Rain Canvas ────────────────────────────────────────────────────────
 function CodeRain() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -87,7 +95,7 @@ function CodeRain() {
     if (!ctx) return;
     const resize = () => { canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight; };
     resize();
-    const chars = "01アイウエオカキクケコサシスセソタチツテトナニヌネノABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const chars = "01アイウエオカキクケコサシスセソタチツテトVORAIABCDEFGHIJKLMNOPQRSTUVWXYZ";
     const fontSize = 13;
     let cols = Math.floor(canvas.width / fontSize);
     const drops: number[] = Array(cols).fill(1);
@@ -99,20 +107,65 @@ function CodeRain() {
         const progress = drops[i] / (canvas.height / fontSize);
         if (progress < 0.3) ctx.fillStyle = "#FFFFFF";
         else if (progress < 0.6) ctx.fillStyle = "#FFD700";
-        else ctx.fillStyle = "rgba(255,215,0,0.4)";
+        else ctx.fillStyle = "rgba(255,215,0,0.35)";
         ctx.font = `${fontSize}px 'JetBrains Mono', monospace`;
         ctx.fillText(char, i * fontSize, drops[i] * fontSize);
         if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
         drops[i]++;
       }
       cols = Math.floor(canvas.width / fontSize);
-      while (drops.length < cols) drops.push(Math.random() * (canvas.height / fontSize));
+      while (drops.length < cols) drops.push(Math.random() * -30);
     };
     const interval = setInterval(draw, 45);
     window.addEventListener("resize", resize);
     return () => { clearInterval(interval); window.removeEventListener("resize", resize); };
   }, []);
-  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full opacity-80" />;
+  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />;
+}
+
+// ─── System Health Badge ─────────────────────────────────────────────────────
+function SystemHealthBadge({ status, configured, healthy }: { status: "GREEN" | "YELLOW" | "RED"; configured: number; healthy: number }) {
+  const color = status === "GREEN" ? "bg-emerald-500" : status === "YELLOW" ? "bg-yellow-500" : "bg-red-500";
+  const glow = status === "GREEN" ? "shadow-[0_0_8px_rgba(16,185,129,0.8)]" : status === "YELLOW" ? "shadow-[0_0_8px_rgba(234,179,8,0.8)]" : "shadow-[0_0_8px_rgba(239,68,68,0.8)]";
+  const label = status === "GREEN" ? "All Systems Go" : status === "YELLOW" ? "Some Keys Limited" : "Keys Exhausted";
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border/50 bg-secondary/30 cursor-default">
+            <div className={`w-2 h-2 rounded-full ${color} ${glow} animate-pulse`} />
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground hidden sm:inline">{status}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs">
+          <p className="font-bold">{label}</p>
+          <p className="text-muted-foreground">{healthy}/{configured} keys healthy</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+// ─── SEO extractor ───────────────────────────────────────────────────────────
+function extractSeoMeta(html: string): { title: string; description: string; keywords: string } {
+  const titleMatch = html.match(/<title[^>]*>(.*?)<\/title>/i);
+  const descMatch = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i)
+    || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i);
+  const kwMatch = html.match(/<meta[^>]+name=["']keywords["'][^>]+content=["']([^"']+)["']/i)
+    || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']keywords["']/i);
+  return {
+    title: titleMatch?.[1]?.replace(" | Vora AI", "").trim() ?? "",
+    description: descMatch?.[1]?.trim() ?? "",
+    keywords: kwMatch?.[1]?.trim() ?? "",
+  };
+}
+
+function generateSitemap(date: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url>\n    <loc>https://voraai.app</loc>\n    <lastmod>${date}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>1.0</priority>\n  </url>\n</urlset>`;
+}
+
+function generateRobotsTxt(): string {
+  return `User-agent: *\nAllow: /\nSitemap: https://voraai.app/sitemap.xml\n\n# Powered by Vora AI — https://voraai.app`;
 }
 
 function sanitizeHtml(raw: string): string {
@@ -137,23 +190,26 @@ function sanitizeHtml(raw: string): string {
 function getFreeBuildCount(): number {
   return parseInt(localStorage.getItem(BUILDS_KEY) || "0", 10);
 }
-
 function incrementFreeBuildCount(): number {
   const next = getFreeBuildCount() + 1;
   localStorage.setItem(BUILDS_KEY, String(next));
   return next;
 }
 
+// ─── DASHBOARD ───────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [prompt, setPrompt] = useState("");
   const [htmlContent, setHtmlContent] = useState("");
   const [status, setStatus] = useState<"idle" | "thinking" | "streaming" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [deviceWidth, setDeviceWidth] = useState<"desktop" | "tablet" | "mobile">("desktop");
-  const [showCode, setShowCode] = useState(false);
+  const [showCode, setShowCode] = useState(true);
   const [showSeo, setShowSeo] = useState(false);
   const [lastPrompt, setLastPrompt] = useState("");
   const [freeBuildCount, setFreeBuildCount] = useState(getFreeBuildCount());
+  const [activeKeySlot, setActiveKeySlot] = useState(0);
+  const [sitemap, setSitemap] = useState("");
+  const [robotsTxt, setRobotsTxt] = useState("");
 
   const [currentProjectId, setCurrentProjectId] = useState<string | undefined>(undefined);
   const [currentProjectTitle, setCurrentProjectTitle] = useState("");
@@ -177,10 +233,14 @@ export default function Dashboard() {
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const codeEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const isRootOwnerUser = isRootOwner(user?.email);
   const isLimited = !isRootOwnerUser && tier === "starter" && freeBuildCount >= FREE_BUILD_LIMIT;
   const buildsLeft = isRootOwnerUser ? Infinity : Math.max(0, FREE_BUILD_LIMIT - freeBuildCount);
+
+  const health = getSystemHealth();
+  const keyMonitor = getKeyMonitorInfo();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -194,34 +254,13 @@ export default function Dashboard() {
           setPrompt(p.prompt);
           setHtmlContent(p.html);
           setLastPrompt(p.prompt);
+          setSitemap(p.sitemap ?? "");
+          setRobotsTxt(p.robotsTxt ?? "");
           if (isMobile) setActiveTab("preview");
         }
       });
     }
   }, [user, isMobile]);
-
-  const autoSave = async (html: string, promptText: string) => {
-    if (!user || !html) return;
-    setAutoSaveStatus("saving");
-    try {
-      if (currentProjectId) {
-        await updateProject(user, currentProjectId, { html, prompt: promptText, title: currentProjectTitle });
-      } else {
-        const title = (currentProjectTitle || promptText.slice(0, 60).trim() || "Untitled").replace(/\n+/g, " ");
-        const id = await saveProject(user, { title, prompt: promptText, html });
-        setCurrentProjectId(id);
-        setCurrentProjectTitle(title);
-        const url = new URL(window.location.href);
-        url.searchParams.set("id", id);
-        window.history.replaceState({}, "", url.toString());
-      }
-      setAutoSaveStatus("saved");
-      setTimeout(() => setAutoSaveStatus((s) => (s === "saved" ? "idle" : s)), 2400);
-    } catch (err) {
-      console.error("Auto-save failed", err);
-      setAutoSaveStatus("idle");
-    }
-  };
 
   useEffect(() => {
     if (transcript) setPrompt(prev => prev.replace(transcript, "") + transcript);
@@ -231,21 +270,53 @@ export default function Dashboard() {
     if (showCode && status === "streaming") codeEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [htmlContent, showCode, status]);
 
+  const autoSave = async (html: string, promptText: string, sm: string, rb: string) => {
+    if (!user || !html) return;
+    setAutoSaveStatus("saving");
+    try {
+      const seo = extractSeoMeta(html);
+      const data = {
+        html,
+        prompt: promptText,
+        title: currentProjectTitle || promptText.slice(0, 60).trim() || "Untitled",
+        sitemap: sm,
+        robotsTxt: rb,
+        seoKeywords: seo.keywords,
+        seoDescription: seo.description,
+      };
+      if (currentProjectId) {
+        await updateProject(user, currentProjectId, data);
+      } else {
+        const title = data.title.replace(/\n+/g, " ");
+        const id = await saveProject(user, { ...data, title });
+        setCurrentProjectId(id);
+        setCurrentProjectTitle(title);
+        const url = new URL(window.location.href);
+        url.searchParams.set("id", id);
+        window.history.replaceState({}, "", url.toString());
+      }
+      setAutoSaveStatus("saved");
+      setTimeout(() => setAutoSaveStatus(s => s === "saved" ? "idle" : s), 2400);
+    } catch (err) {
+      console.error("Auto-save failed", err);
+      setAutoSaveStatus("idle");
+    }
+  };
+
   const handleGenerate = async (currentPrompt: string = prompt, sysPrompt: string = SYSTEM_PROMPT) => {
     if (!currentPrompt.trim()) return;
 
     if (tier === "starter" && sysPrompt === SYSTEM_PROMPT) {
-      if (freeBuildCount >= FREE_BUILD_LIMIT) {
+      if (freeBuildCount >= FREE_BUILD_LIMIT && !isRootOwnerUser) {
         setShowPricing(true);
         return;
       }
     }
 
-    // Fair-use rate limiter
     const rl = checkRateLimit();
     if (!rl.allowed) {
       setStatus("error");
-      setErrorMessage(`Rate limit reached (15/min). Reset in ${rl.resetInSec}s. This protects your API quota.`);
+      setErrorMessage(`Rate limit reached (2/min). Resets in ${rl.resetInSec}s — this protects your API quota.`);
       return;
     }
     consumeRateSlot();
@@ -254,42 +325,37 @@ export default function Dashboard() {
     setErrorMessage("");
     if (sysPrompt === SYSTEM_PROMPT) {
       setLastPrompt(currentPrompt);
-      if (tier === "starter") {
-        const newCount = incrementFreeBuildCount();
-        setFreeBuildCount(newCount);
+      if (tier === "starter" && !isRootOwnerUser) {
+        setFreeBuildCount(incrementFreeBuildCount());
       }
     }
     if (isMobile) setActiveTab("preview");
     void trackEvent("generation_started", { uid: user?.uid });
 
     try {
-      const ai = createGeminiClient();
-      const responseStream = await ai.models.generateContentStream({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: currentPrompt }] }],
-        config: {
-          systemInstruction: sysPrompt,
-          temperature: 0.7,
-          responseMimeType: "text/plain",
-        },
-      });
-
       let fullText = "";
       let firstChunk = true;
-      for await (const chunk of responseStream) {
-        fullText += chunk.text ?? "";
-        const cleanHtml = sanitizeHtml(fullText);
+
+      for await (const chunk of streamWithFallback(currentPrompt, sysPrompt, (slot) => setActiveKeySlot(slot))) {
+        fullText += chunk;
         if (firstChunk) { setStatus("streaming"); firstChunk = false; }
-        setHtmlContent(cleanHtml);
+        setHtmlContent(sanitizeHtml(fullText));
       }
+
+      const finalHtml = sanitizeHtml(fullText);
+      const today = new Date().toISOString().split("T")[0];
+      const sm = generateSitemap(today);
+      const rb = generateRobotsTxt();
 
       setStatus("idle");
       setTranscript("");
-      void trackEvent("generation_complete", { uid: user?.uid });
-
-      const finalHtml = sanitizeHtml(fullText);
+      setSitemap(sm);
+      setRobotsTxt(rb);
       if (finalHtml) setHtmlContent(finalHtml);
-      if (sysPrompt === SYSTEM_PROMPT && finalHtml) void autoSave(finalHtml, currentPrompt);
+
+      void trackEvent("generation_complete", { uid: user?.uid });
+      if (sysPrompt === SYSTEM_PROMPT && finalHtml) void autoSave(finalHtml, currentPrompt, sm, rb);
+
     } catch (err: any) {
       console.error(err);
       setStatus("error");
@@ -317,17 +383,15 @@ export default function Dashboard() {
     toast({ title: "Copied!", description: "HTML copied to clipboard." });
   };
 
-  const handleDownload = () => {
-    exportZip(htmlContent, lastPrompt, currentProjectTitle || "vora-project");
-  };
-
+  const handleDownload = () => exportZip(htmlContent, lastPrompt, currentProjectTitle || "vora-project");
   const requirePremium = (fn: () => void) => { if (tier === "starter") setShowPricing(true); else fn(); };
   const requireAuthAndPremium = (fn: () => void) => {
-    if (!user) toast({ title: "Sign in required", description: "Please sign in to use this feature." });
+    if (!user) toast({ title: "Sign in required" });
     else if (tier === "starter") setShowPricing(true);
     else fn();
   };
 
+  // ─── User Menu ──────────────────────────────────────────────────────────────
   const UserMenu = () => (
     user ? (
       <DropdownMenu>
@@ -335,7 +399,7 @@ export default function Dashboard() {
           <Button variant="ghost" className="h-9 w-9 rounded-full p-0">
             <Avatar className="h-9 w-9 border border-border/50">
               <AvatarImage src={user.photoURL || undefined} alt={user.displayName || "User"} />
-              <AvatarFallback>{user.displayName?.[0] || "U"}</AvatarFallback>
+              <AvatarFallback className="text-primary bg-primary/10">{user.displayName?.[0] || "U"}</AvatarFallback>
             </Avatar>
           </Button>
         </DropdownMenuTrigger>
@@ -361,289 +425,73 @@ export default function Dashboard() {
             <ShieldCheck className="w-4 h-4 mr-2" /> Owner Console
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={signOut} className="cursor-pointer text-destructive focus:text-destructive">
+          <DropdownMenuItem onClick={() => void signOut()} className="cursor-pointer text-destructive focus:text-destructive">
             <LogOut className="w-4 h-4 mr-2" /> Sign out
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     ) : (
-      <Button variant="outline" size="sm" onClick={signIn} className="neon-border rounded-full h-9 px-4">
+      <Button variant="outline" size="sm" onClick={() => setLocation("/auth")} className="neon-border rounded-full h-9 px-4 font-semibold">
         <LogIn className="w-4 h-4 mr-1.5" /> Sign In
       </Button>
     )
   );
 
-  const ComposePane = () => (
-    <div className="w-full md:w-[400px] lg:w-[480px] h-full border-r border-border/50 flex flex-col relative z-10 bg-background/80 backdrop-blur-xl shrink-0 ambient-bg">
-      {/* Header row — logo + auth always in same line */}
-      <div className="h-14 px-4 flex items-center justify-between shrink-0 border-b border-border/30 md:border-0">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center border breathing-glow shrink-0">
-            <VoraIcon className="w-5 h-5 text-primary" />
-          </div>
-          <span className="font-bold text-lg tracking-tight shrink-0 neon-text">Vora AI</span>
-          {currentProjectTitle && (
-            <span className="hidden sm:inline px-2 py-0.5 bg-secondary text-xs rounded-md truncate max-w-[100px]">
-              {currentProjectTitle}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <ThemeToggle />
-          <UserMenu />
-        </div>
-      </div>
-
-      {/* Headline — hidden on mobile to save space */}
-      <div className="hidden md:block px-6 pt-4 pb-3">
-        <h1 className="text-3xl lg:text-4xl font-bold tracking-tighter leading-tight">
-          Speak it.<br />
-          <span className="text-primary neon-text">Type it.</span><br />
-          Ship it.
-        </h1>
-        <p className="text-muted-foreground mt-2 text-sm">
-          Describe the interface you want. Watch it build in real-time.
-        </p>
-      </div>
-
-      {/* Free build counter banner */}
-      {tier === "starter" && (
-        <div className={`mx-4 mb-2 px-3 py-2 rounded-lg text-xs flex items-center justify-between gap-2 ${
-          buildsLeft === 0
-            ? "bg-destructive/10 border border-destructive/20 text-destructive"
-            : buildsLeft === 1
-            ? "bg-yellow-500/10 border border-yellow-500/20 text-yellow-400"
-            : "bg-primary/5 border border-primary/10 text-muted-foreground"
-        }`}>
-          <div className="flex items-center gap-1.5">
-            <Zap className="w-3.5 h-3.5" />
-            {buildsLeft > 0
-              ? <span><strong>{buildsLeft}</strong> free build{buildsLeft !== 1 ? "s" : ""} left</span>
-              : <span>Free limit reached</span>}
-          </div>
-          <button onClick={() => setShowPricing(true)} className="font-semibold underline underline-offset-2 hover:opacity-80">
-            {buildsLeft === 0 ? "Upgrade now" : "Go unlimited →"}
-          </button>
-        </div>
-      )}
-
-      {/* Compose area */}
-      <div className="px-4 flex-1 flex flex-col min-h-0 pb-4 gap-2">
-        <TemplatesPicker onSelect={(p) => setPrompt(p)} />
-
-        <div className="relative group flex-1 flex flex-col min-h-0">
-          <div className="absolute -inset-0.5 bg-gradient-to-r from-primary/30 to-primary/0 rounded-xl blur opacity-30 group-focus-within:opacity-100 transition duration-500 pointer-events-none" />
-          <div className="relative flex-1 flex flex-col bg-card border border-border/50 rounded-xl overflow-hidden focus-within:border-primary/50 transition-all duration-300">
-            <Textarea
-              placeholder={isMobile ? "Describe what to build… (e.g. a landing page for a fitness app)" : "What are we building today? (Cmd+Enter to ship)"}
-              className="flex-1 resize-none border-0 focus-visible:ring-0 text-sm md:text-base p-3 md:p-4 bg-transparent min-h-[100px]"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleGenerate(); } }}
-            />
-
-            <div className="p-2.5 md:p-3 bg-card/50 border-t border-border/30 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1">
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost" size="icon"
-                        className={`rounded-full h-8 w-8 transition-all ${isListening ? "text-destructive" : "text-muted-foreground hover:text-primary"}`}
-                        onClick={toggleListening} disabled={!supported}
-                      >
-                        {isListening ? (
-                          <div className="relative flex items-center justify-center">
-                            <span className="absolute inline-flex h-full w-full rounded-full bg-destructive opacity-40 animate-ping" />
-                            <Mic className="w-4 h-4 relative z-10" />
-                          </div>
-                        ) : <Mic className="w-4 h-4" />}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{supported ? "Voice dictation" : "Not supported"}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-
-              <Button
-                onClick={() => handleGenerate()}
-                disabled={!prompt.trim() || status === "thinking" || status === "streaming" || isLimited}
-                className="laser-hover bg-primary text-primary-foreground hover:bg-primary/90 font-bold rounded-full px-5 h-9 shadow-[0_0_20px_rgba(255,215,0,0.4)] hover:shadow-[0_0_35px_rgba(255,215,0,0.7)] transition-all text-sm tracking-wide"
-              >
-                {(status === "thinking" || status === "streaming")
-                  ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> Building…</>
-                  : isLimited
-                  ? <><Lock className="w-4 h-4 mr-1.5" /> Upgrade</>
-                  : <><Sparkles className="w-4 h-4 mr-1.5" /> Ship it</>}
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        <AnimatePresence>
-          {status === "error" && (
-            <motion.div initial={{ opacity: 0, y: 8, height: 0 }} animate={{ opacity: 1, y: 0, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-              className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm flex items-start gap-2.5">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-              <div className="flex-1 min-w-0">
-                <p className="font-medium">Generation Failed</p>
-                <p className="opacity-80 text-xs mt-0.5 break-words">{errorMessage}</p>
-                <Button variant="outline" size="sm" className="mt-2 h-7 text-xs border-destructive/30 hover:bg-destructive/10 text-destructive" onClick={() => handleGenerate(lastPrompt)}>
-                  Try Again
-                </Button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* Status footer + Key Monitor */}
-      <div className="px-4 py-1.5 border-t border-border/30 flex items-center justify-between text-xs text-muted-foreground shrink-0 gap-2">
-        <div className="flex items-center gap-2">
-          <div className={`w-1.5 h-1.5 rounded-full ${status === "idle" ? "bg-muted-foreground/30" : status === "error" ? "bg-destructive" : "bg-primary animate-pulse shadow-[0_0_6px_rgba(255,215,0,0.9)]"}`} />
-          {status === "idle" && "Ready"}
-          {status === "thinking" && <span className="text-primary">Thinking…</span>}
-          {status === "streaming" && <span className="text-primary animate-pulse">● Building…</span>}
-          {status === "error" && <span className="text-destructive">Error</span>}
-        </div>
-
-        {/* API Key Monitor — 6 slots */}
-        <div className="flex items-center gap-1" title="Gemini API key slots">
-          {getKeyMonitorInfo().slots.map((slot: KeySlotInfo) => (
-            <div
-              key={slot.slot}
-              title={`Key ${slot.slot}: ${slot.configured ? (slot.active ? "ACTIVE" : "standby") : "not configured"}`}
-              className={`w-3 h-1.5 rounded-full transition-all ${
-                !slot.configured
-                  ? "bg-border/40"
-                  : slot.active && (status === "thinking" || status === "streaming")
-                  ? "bg-primary key-active shadow-[0_0_6px_rgba(255,215,0,0.8)]"
-                  : slot.active
-                  ? "bg-primary shadow-[0_0_4px_rgba(255,215,0,0.5)]"
-                  : "bg-primary/30"
-              }`}
-            />
-          ))}
-        </div>
-
-        <div className="flex items-center gap-1">
-          {autoSaveStatus === "saving" && <><Loader2 className="w-3 h-3 animate-spin" /> Saving</>}
-          {autoSaveStatus === "saved" && <><CheckCircle2 className="w-3 h-3 text-primary" /> Saved</>}
-          {autoSaveStatus === "idle" && user && currentProjectId && <><Cloud className="w-3 h-3" /> Synced</>}
-        </div>
-      </div>
-    </div>
-  );
-
-  const ToolbarContent = ({ compact = false }: { compact?: boolean }) => (
+  // ─── Toolbar ─────────────────────────────────────────────────────────────────
+  const ToolbarActions = ({ compact = false }: { compact?: boolean }) => (
     <TooltipProvider>
-      <div className={`flex items-center ${compact ? "flex-col gap-1 p-1" : "gap-0.5"}`}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-foreground"
-              onClick={() => user ? setShowSave(true) : toast({ title: "Sign in required" })} disabled={!htmlContent}>
-              <Save className="w-4 h-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side={compact ? "left" : "bottom"}>Save Project</TooltipContent>
-        </Tooltip>
+      <div className={`flex items-center ${compact ? "gap-0" : "gap-0.5"}`}>
+        {[
+          { icon: <Save className="w-4 h-4" />, label: "Save", onClick: () => user ? setShowSave(true) : toast({ title: "Sign in required" }), disabled: !htmlContent },
+          { icon: <div className="relative"><Wand2 className="w-4 h-4" />{tier === "starter" && <Lock className="w-2 h-2 absolute -top-1 -right-1 text-primary" />}</div>, label: `Magic Wand${tier === "starter" ? " (Pro)" : ""}`, onClick: handleMagicWand, disabled: !htmlContent },
+          { icon: <div className="relative"><Search className="w-4 h-4" />{tier === "starter" && <Lock className="w-2 h-2 absolute -top-1 -right-1 text-primary" />}</div>, label: `SEO Master${tier === "starter" ? " (Pro)" : ""}`, onClick: () => requirePremium(() => setShowSeo(!showSeo)), disabled: !htmlContent, active: showSeo },
+          { icon: <div className="relative"><Megaphone className="w-4 h-4" />{tier === "starter" && <Lock className="w-2 h-2 absolute -top-1 -right-1 text-primary" />}</div>, label: "Promote", onClick: () => requirePremium(() => setShowPromote(true)), disabled: !htmlContent || !currentProjectTitle },
+          { icon: <div className="relative"><Link2 className="w-4 h-4" />{currentSharedSlug && <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-primary" />}</div>, label: currentSharedSlug ? "Shared" : "Share", onClick: () => { if (!user) toast({ title: "Sign in required" }); else if (!currentProjectId) toast({ title: "Save first" }); else setShowShare(true); }, disabled: !htmlContent },
+        ].map(({ icon, label, onClick, disabled, active }) => (
+          <Tooltip key={label}>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className={`h-9 w-9 ${active ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground"}`} onClick={onClick} disabled={disabled}>
+                {icon}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{label}</TooltipContent>
+          </Tooltip>
+        ))}
+
+        <div className="w-px h-5 bg-border/50 mx-1" />
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-foreground" onClick={handleMagicWand} disabled={!htmlContent}>
-              <div className="relative">
-                <Wand2 className="w-4 h-4" />
-                {tier === "starter" && <Lock className="w-2 h-2 absolute -top-1 -right-1 text-primary" />}
-              </div>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side={compact ? "left" : "bottom"}>Magic Wand {tier === "starter" ? "(Pro)" : ""}</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className={`h-9 w-9 ${showSeo ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => requirePremium(() => setShowSeo(!showSeo))} disabled={!htmlContent}>
-              <div className="relative">
-                <Search className="w-4 h-4" />
-                {tier === "starter" && <Lock className="w-2 h-2 absolute -top-1 -right-1 text-primary" />}
-              </div>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side={compact ? "left" : "bottom"}>SEO Master {tier === "starter" ? "(Pro)" : ""}</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-foreground"
-              onClick={() => requirePremium(() => setShowPromote(true))} disabled={!htmlContent || !currentProjectTitle}>
-              <div className="relative">
-                <Megaphone className="w-4 h-4" />
-                {tier === "starter" && <Lock className="w-2 h-2 absolute -top-1 -right-1 text-primary" />}
-              </div>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side={compact ? "left" : "bottom"}>Promote {tier === "starter" ? "(Pro)" : ""}</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost" size="icon"
-              className={`h-9 w-9 ${currentSharedSlug ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => {
-                if (!user) { toast({ title: "Sign in required" }); return; }
-                if (!currentProjectId) { toast({ title: "Save first", description: "Save the project before sharing." }); return; }
-                setShowShare(true);
-              }}
-              disabled={!htmlContent}
-            >
-              <div className="relative">
-                <Link2 className="w-4 h-4" />
-                {currentSharedSlug && <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-primary" />}
-              </div>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side={compact ? "left" : "bottom"}>{currentSharedSlug ? "Shared" : "Share"}</TooltipContent>
-        </Tooltip>
-
-        {!compact && <div className="w-px h-5 bg-border/50 mx-1" />}
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-foreground"
+            <Button variant="ghost" size="icon" className={`h-9 w-9 ${showCode ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground"}`}
               onClick={() => setShowCode(!showCode)} disabled={!htmlContent}>
               <Code className="w-4 h-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side={compact ? "left" : "bottom"}>View Code</TooltipContent>
+          <TooltipContent side="bottom">Toggle Code</TooltipContent>
         </Tooltip>
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-foreground"
-              onClick={copyCode} disabled={!htmlContent}>
+            <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-foreground" onClick={copyCode} disabled={!htmlContent}>
               <Copy className="w-4 h-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side={compact ? "left" : "bottom"}>Copy HTML</TooltipContent>
+          <TooltipContent side="bottom">Copy HTML</TooltipContent>
         </Tooltip>
 
-        {/* Download ZIP — prominent, always visible, available to all */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant={htmlContent ? "default" : "ghost"}
-              size={compact ? "icon" : "sm"}
-              className={`${compact ? "h-9 w-9" : "h-9 px-3 gap-1.5"} ${htmlContent ? "bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30" : "text-muted-foreground"}`}
-              onClick={handleDownload}
-              disabled={!htmlContent || isZipping}
+              size="sm"
+              className={`h-9 px-3 gap-1.5 text-xs font-semibold ${htmlContent ? "bg-primary/15 hover:bg-primary/25 text-primary border border-primary/30" : "text-muted-foreground"}`}
+              onClick={handleDownload} disabled={!htmlContent || isZipping}
             >
-              {isZipping ? <Loader2 className="w-4 h-4 animate-spin" /> : <PackageOpen className="w-4 h-4" />}
-              {!compact && <span className="text-xs font-medium">Download ZIP</span>}
+              {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PackageOpen className="w-3.5 h-3.5" />}
+              <span className="hidden lg:inline">ZIP</span>
             </Button>
           </TooltipTrigger>
-          <TooltipContent side={compact ? "left" : "bottom"}>Download as ZIP</TooltipContent>
+          <TooltipContent side="bottom">Download ZIP</TooltipContent>
         </Tooltip>
 
         <Tooltip>
@@ -656,210 +504,410 @@ export default function Dashboard() {
               </div>
             </Button>
           </TooltipTrigger>
-          <TooltipContent side={compact ? "left" : "bottom"}>Deploy to Vercel {tier !== "billionaire" ? "(Billionaire)" : ""}</TooltipContent>
+          <TooltipContent side="bottom">Deploy to Vercel</TooltipContent>
         </Tooltip>
       </div>
     </TooltipProvider>
   );
 
-  const PreviewPane = () => (
-    <div className="flex-1 flex flex-col relative bg-[#0a0a0a] overflow-hidden min-w-0">
-      {!isMobile && <div className="absolute left-0 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-primary/50 to-transparent opacity-50" />}
-
-      {/* Preview topbar */}
-      <div className="h-12 md:h-14 border-b border-border/30 flex items-center justify-between px-3 md:px-4 bg-background/40 backdrop-blur-sm z-20 gap-2 shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          {!isMobile && (
-            <div className="flex gap-1.5 mr-2 shrink-0">
-              <div className="w-2.5 h-2.5 rounded-full bg-destructive/80" />
-              <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/80" />
-              <div className="w-2.5 h-2.5 rounded-full bg-green-500/80" />
-            </div>
-          )}
-          <div className="bg-secondary/50 rounded px-2 py-1 text-xs font-mono text-muted-foreground border border-border/30 truncate max-w-[140px] md:max-w-none">
-            vora://preview
-          </div>
-          {status === "streaming" && (
-            <span className="text-[10px] text-primary animate-pulse hidden sm:inline shrink-0">● Live</span>
-          )}
+  // ─── Code Panel ──────────────────────────────────────────────────────────────
+  const CodePanel = () => (
+    <div className="flex flex-col h-full bg-[#0a0a0a] overflow-hidden">
+      <div className="h-10 bg-[#0d0d0d] border-b border-white/5 flex items-center justify-between px-4 shrink-0">
+        <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
+          <FileCode2 className="w-3.5 h-3.5 text-primary/70" />
+          <span>generated.html</span>
+          {status === "streaming" && <span className="text-primary animate-pulse ml-2">● live</span>}
         </div>
-
-        <div className="flex items-center gap-1 shrink-0">
-          {/* Device switcher — desktop only */}
-          {!isMobile && (
-            <div className="flex bg-secondary/30 rounded-lg p-0.5 border border-border/30 mr-1">
-              {(["desktop", "tablet", "mobile"] as const).map(w => (
-                <Button key={w} variant="ghost" size="icon" className={`h-7 w-8 rounded-md ${deviceWidth === w ? "bg-background shadow-sm text-primary" : "text-muted-foreground"}`} onClick={() => setDeviceWidth(w)}>
-                  {w === "desktop" && <Monitor className="w-3.5 h-3.5" />}
-                  {w === "tablet" && <Tablet className="w-3.5 h-3.5" />}
-                  {w === "mobile" && <Smartphone className="w-3.5 h-3.5" />}
-                </Button>
-              ))}
-            </div>
+        <div className="flex items-center gap-1">
+          {sitemap && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20 uppercase tracking-wider cursor-default">
+                    <Globe2 className="w-2.5 h-2.5" />sitemap
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs font-mono text-xs whitespace-pre-wrap">{sitemap}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
-
-          {/* On mobile: show download + more menu. On desktop: show full toolbar */}
-          {isMobile ? (
-            <div className="flex items-center gap-1">
-              <TooltipProvider>
-                <Button
-                  variant={htmlContent ? "default" : "ghost"}
-                  size="icon"
-                  className={`h-9 w-9 ${htmlContent ? "bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30" : "text-muted-foreground"}`}
-                  onClick={handleDownload}
-                  disabled={!htmlContent || isZipping}
-                >
-                  {isZipping ? <Loader2 className="w-4 h-4 animate-spin" /> : <PackageOpen className="w-4 h-4" />}
-                </Button>
-              </TooltipProvider>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-9 w-9"><MoreVertical className="w-4 h-4" /></Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-52">
-                  <DropdownMenuItem onClick={() => user ? setShowSave(true) : toast({ title: "Sign in required" })} disabled={!htmlContent}>
-                    <Save className="w-4 h-4 mr-2" /> Save Project
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleMagicWand} disabled={!htmlContent}>
-                    <Wand2 className="w-4 h-4 mr-2" /> Magic Wand {tier === "starter" ? "(Pro)" : ""}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={copyCode} disabled={!htmlContent}>
-                    <Copy className="w-4 h-4 mr-2" /> Copy HTML
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setShowCode(!showCode)} disabled={!htmlContent}>
-                    <Code className="w-4 h-4 mr-2" /> {showCode ? "Hide" : "View"} Code
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => requireAuthAndPremium(() => setShowVercel(true))} disabled={!htmlContent}>
-                    <svg className="w-4 h-4 mr-2" viewBox="0 0 76 65" fill="currentColor"><path d="M37.5274 0L75.0548 65H0L37.5274 0Z" /></svg>
-                    Deploy to Vercel
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          ) : (
-            <ToolbarContent />
+          {robotsTxt && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase tracking-wider cursor-default">
+                    <FileSearch className="w-2.5 h-2.5" />robots
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs font-mono text-xs whitespace-pre-wrap">{robotsTxt}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
+          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={copyCode} disabled={!htmlContent}>
+            <Copy className="w-3 h-3" />
+          </Button>
         </div>
       </div>
-
-      {/* Preview + code panel */}
-      <div className="flex-1 relative overflow-hidden flex flex-row min-h-0">
-        <div className="flex-1 flex flex-col relative min-w-0">
-          <div className="flex-1 flex justify-center items-start overflow-auto p-2 md:p-6">
-            <motion.div
-              layout
-              className={`relative bg-white rounded-lg md:rounded-xl overflow-hidden transition-all duration-500 shadow-xl md:shadow-2xl ring-1 ring-border/50 ${status === "streaming" ? "ring-primary/60 shadow-[0_0_30px_rgba(255,215,0,0.15)]" : ""} ${!htmlContent ? "bg-transparent ring-0 shadow-none" : ""}`}
-              style={{
-                width: "100%",
-                maxWidth: isMobile ? "100%" : deviceWidth === "mobile" ? "390px" : deviceWidth === "tablet" ? "768px" : "100%",
-                minHeight: "100%",
-              }}
-            >
-              <iframe
-                ref={iframeRef}
-                key={htmlContent ? `preview-${htmlContent.length}` : "preview-empty"}
-                srcDoc={htmlContent || "<!doctype html><html><body style=\"margin:0;background:transparent\"></body></html>"}
-                className={`w-full h-full min-h-[400px] bg-white ${!htmlContent ? "opacity-0 pointer-events-none" : "materialize"}`}
-                sandbox="allow-scripts"
-                title="Preview"
-                style={{ minHeight: isMobile ? "calc(100vh - 120px)" : "100%" }}
-              />
-              {!htmlContent && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-background to-background/50 border border-border/20 rounded-xl pointer-events-none">
-                  <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center text-center px-4">
-                    <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4 neon-border">
-                      <VoraIcon className="w-7 h-7 md:w-8 md:h-8 text-primary" />
-                    </div>
-                    <h2 className="text-xl md:text-2xl font-bold tracking-tight mb-1">Describe anything.</h2>
-                    <p className="text-muted-foreground text-sm">We'll build it.</p>
-                    {isMobile && (
-                      <Button variant="outline" size="sm" className="mt-4 rounded-full" onClick={() => setActiveTab("compose")}>
-                        <ChevronRight className="w-4 h-4 mr-1 rotate-180" /> Go to Compose
-                      </Button>
-                    )}
-                  </motion.div>
-                </div>
-              )}
-              {(status === "thinking" || (status === "streaming" && !htmlContent)) && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#080808] rounded-xl pointer-events-none overflow-hidden">
-                  <CodeRain />
-                  <div className="absolute flex flex-col items-center gap-3 z-10">
-                    <div className="flex items-center gap-3 px-6 py-3 rounded-full border border-primary/50 bg-black/80 backdrop-blur-sm text-sm font-bold text-primary shadow-[0_0_30px_rgba(255,215,0,0.4)] tracking-widest uppercase">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      {status === "thinking" ? "Igniting Engine…" : "Streaming…"}
-                    </div>
-                    <p className="text-primary/50 text-xs font-mono tracking-widest">VORA AI — GEMINI 2.5 FLASH</p>
-                  </div>
-                </div>
-              )}
-            </motion.div>
+      <div className="flex-1 overflow-auto p-4 text-xs font-mono leading-relaxed text-gray-300">
+        {htmlContent ? (
+          <pre className="m-0 whitespace-pre-wrap break-all"><code>{htmlContent}</code></pre>
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground/30">
+            <TerminalSquare className="w-10 h-10" />
+            <p className="text-xs">Code appears here as it streams…</p>
           </div>
-
-          {/* Code panel — hidden on mobile */}
-          <AnimatePresence>
-            {showCode && !isMobile && (
-              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "38%", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-                className="border-t border-border/50 bg-[#0d0d0d] overflow-hidden flex flex-col shrink-0">
-                <div className="h-8 bg-secondary/30 border-b border-border/30 flex items-center justify-between px-4 text-xs font-mono text-muted-foreground shrink-0">
-                  <div className="flex items-center gap-2"><TerminalSquare className="w-3.5 h-3.5" /> generated.html</div>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={copyCode} disabled={!htmlContent}>
-                    <Copy className="w-3 h-3" />
-                  </Button>
-                </div>
-                <div className="flex-1 overflow-auto p-4 text-xs font-mono leading-relaxed text-gray-300">
-                  <pre className="m-0 whitespace-pre-wrap break-all"><code>{htmlContent || "/* Awaiting generation… */"}</code></pre>
-                  <div ref={codeEndRef} />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* SEO sidebar — desktop only */}
-        <AnimatePresence>
-          {showSeo && !isMobile && (
-            <motion.div initial={{ width: 0, opacity: 0 }} animate={{ width: 320, opacity: 1 }} exit={{ width: 0, opacity: 0 }} className="overflow-hidden shrink-0">
-              <SEOMaster html={htmlContent} onFix={handleSEOFix} />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        )}
+        <div ref={codeEndRef} />
       </div>
     </div>
   );
 
+  // ─── Preview Panel ────────────────────────────────────────────────────────────
+  const PreviewPanel = () => (
+    <div className="flex flex-col h-full bg-[#0a0a0a] overflow-hidden relative">
+      <div className="h-10 border-b border-white/5 flex items-center justify-between px-3 bg-[#0d0d0d] shrink-0 z-10 gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {!isMobile && (
+            <div className="flex gap-1.5 mr-1 shrink-0">
+              <div className="w-2.5 h-2.5 rounded-full bg-destructive/70" />
+              <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/70" />
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/70" />
+            </div>
+          )}
+          <div className="bg-secondary/40 rounded px-2 py-0.5 text-[11px] font-mono text-muted-foreground border border-border/20 truncate max-w-[140px] sm:max-w-none">
+            vora://preview
+          </div>
+          {status === "streaming" && <span className="text-[10px] text-primary animate-pulse shrink-0">● Live</span>}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {!isMobile && (
+            <div className="flex bg-secondary/20 rounded-lg p-0.5 border border-border/20">
+              {(["desktop", "tablet", "mobile"] as const).map(w => (
+                <Button key={w} variant="ghost" size="icon" className={`h-6 w-7 rounded-md ${deviceWidth === w ? "bg-background shadow text-primary" : "text-muted-foreground"}`} onClick={() => setDeviceWidth(w)}>
+                  {w === "desktop" && <Monitor className="w-3 h-3" />}
+                  {w === "tablet" && <Tablet className="w-3 h-3" />}
+                  {w === "mobile" && <Smartphone className="w-3 h-3" />}
+                </Button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 relative overflow-hidden">
+        <div className="absolute inset-0 flex justify-center items-start overflow-auto p-2 md:p-4">
+          <motion.div
+            layout
+            className={`relative rounded-lg overflow-hidden transition-all duration-500 ring-1 w-full h-full ${
+              status === "streaming" ? "ring-primary/50 shadow-[0_0_25px_rgba(255,215,0,0.12)]" : "ring-border/30"
+            } ${!htmlContent ? "bg-transparent ring-0" : "bg-white"}`}
+            style={{
+              maxWidth: !isMobile && deviceWidth === "mobile" ? "390px" : !isMobile && deviceWidth === "tablet" ? "768px" : "100%",
+              minHeight: "100%",
+            }}
+          >
+            <iframe
+              ref={iframeRef}
+              key={htmlContent ? `preview-${htmlContent.length}` : "preview-empty"}
+              srcDoc={htmlContent || "<!doctype html><html><body style='margin:0;background:transparent'></body></html>"}
+              className={`w-full bg-white ${!htmlContent ? "opacity-0 pointer-events-none" : "materialize"}`}
+              sandbox="allow-scripts"
+              title="Preview"
+              style={{ height: isMobile ? "calc(100vh - 200px)" : "100%", minHeight: 400 }}
+            />
+
+            {/* Empty state */}
+            {!htmlContent && status === "idle" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center text-center px-6">
+                  <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4 breathing-glow border border-primary/30">
+                    <VoraIcon className="w-8 h-8 text-primary" />
+                  </div>
+                  <h2 className="text-2xl font-black tracking-tighter mb-2">Describe anything.</h2>
+                  <p className="text-muted-foreground text-sm max-w-xs">Type your idea in the prompt bar above and hit Ship it.</p>
+                </motion.div>
+              </div>
+            )}
+
+            {/* Code Rain thinking overlay */}
+            {(status === "thinking" || (status === "streaming" && !htmlContent)) && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#080808] rounded-lg pointer-events-none overflow-hidden">
+                <CodeRain />
+                <div className="absolute flex flex-col items-center gap-3 z-10">
+                  <div className="flex items-center gap-3 px-7 py-3.5 rounded-full border border-primary/50 bg-black/80 backdrop-blur-sm text-sm font-black text-primary shadow-[0_0_40px_rgba(255,215,0,0.5)] tracking-widest uppercase">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    {status === "thinking" ? "Igniting Engine…" : "Streaming…"}
+                  </div>
+                  <p className="text-primary/40 text-[10px] font-mono tracking-[0.3em] uppercase">
+                    Gemini 2.5 Flash · Key {activeKeySlot + 1}/6
+                  </p>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        </div>
+      </div>
+
+      {/* SEO sidebar */}
+      <AnimatePresence>
+        {showSeo && !isMobile && (
+          <motion.div initial={{ width: 0, opacity: 0 }} animate={{ width: 300, opacity: 1 }} exit={{ width: 0, opacity: 0 }}
+            className="absolute right-0 top-10 bottom-0 overflow-hidden border-l border-border/30 bg-background z-20">
+            <SEOMaster html={htmlContent} onFix={handleSEOFix} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+
+  // ─── RENDER ───────────────────────────────────────────────────────────────────
   return (
-    <div className="h-[100dvh] w-full bg-background text-foreground selection:bg-primary/30 flex flex-col md:flex-row overflow-hidden">
+    <div className="h-[100dvh] w-full bg-background text-foreground selection:bg-primary/30 flex flex-col overflow-hidden">
+
+      {/* ── FACTORY HEADER ─────────────────────────────────────────────────── */}
+      <header className="h-14 md:h-16 border-b border-border/30 flex items-center gap-2 px-3 md:px-4 bg-background/90 backdrop-blur-xl shrink-0 z-30">
+        {/* Logo */}
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="h-8 w-8 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center breathing-glow">
+            <VoraIcon className="w-5 h-5 text-primary" />
+          </div>
+          <span className="font-black text-base tracking-tight neon-text hidden sm:block">VORA AI</span>
+        </div>
+
+        {/* System Health */}
+        <SystemHealthBadge status={health.status} configured={health.configured} healthy={health.healthy} />
+
+        {/* Free build counter (compact) */}
+        {tier === "starter" && buildsLeft <= 3 && (
+          <div className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border shrink-0 ${
+            buildsLeft === 0 ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-primary/20 bg-primary/5 text-muted-foreground"
+          }`}>
+            <Zap className="w-3 h-3" />
+            {buildsLeft > 0 ? `${buildsLeft} left` : "Upgrade"}
+          </div>
+        )}
+
+        {/* ── MASTER PROMPT BAR ─────────────────────────────────────────────── */}
+        <div className="flex-1 relative flex items-center min-w-0">
+          <div className="absolute -inset-0.5 bg-gradient-to-r from-primary/20 to-primary/5 rounded-full blur opacity-50 group-focus-within:opacity-100 transition pointer-events-none" />
+          <div className="relative w-full flex items-center bg-card border border-border/50 rounded-full focus-within:border-primary/60 transition-all duration-300 shadow-sm overflow-hidden">
+            <Textarea
+              ref={textareaRef}
+              placeholder="Describe your dream website… (Ctrl+Enter to ship)"
+              className="flex-1 resize-none border-0 focus-visible:ring-0 text-sm px-4 py-2.5 bg-transparent min-h-0 max-h-32 leading-snug"
+              rows={1}
+              value={prompt}
+              onChange={e => {
+                setPrompt(e.target.value);
+                e.target.style.height = "auto";
+                e.target.style.height = Math.min(e.target.scrollHeight, 128) + "px";
+              }}
+              onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleGenerate(); } }}
+              style={{ height: "40px" }}
+            />
+
+            {/* Voice */}
+            <Button
+              variant="ghost" size="icon"
+              className={`rounded-full h-8 w-8 mr-1 shrink-0 transition-all ${isListening ? "text-destructive" : "text-muted-foreground hover:text-primary"}`}
+              onClick={toggleListening} disabled={!supported}
+            >
+              {isListening ? (
+                <div className="relative flex items-center justify-center">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-destructive opacity-40 animate-ping" />
+                  <Mic className="w-4 h-4 relative z-10" />
+                </div>
+              ) : <Mic className="w-4 h-4" />}
+            </Button>
+
+            {/* Ship it */}
+            <Button
+              onClick={() => handleGenerate()}
+              disabled={!prompt.trim() || status === "thinking" || status === "streaming" || (isLimited && !isRootOwnerUser)}
+              className="laser-hover bg-primary text-primary-foreground hover:bg-primary/90 font-black rounded-full px-5 h-9 mr-1 shrink-0 shadow-[0_0_20px_rgba(255,215,0,0.35)] hover:shadow-[0_0_35px_rgba(255,215,0,0.6)] transition-all text-sm tracking-wide"
+            >
+              {(status === "thinking" || status === "streaming")
+                ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Building…</>
+                : (isLimited && !isRootOwnerUser)
+                ? <><Lock className="w-4 h-4 mr-1.5" />Upgrade</>
+                : <><Sparkles className="w-4 h-4 mr-1.5" />Ship it</>}
+            </Button>
+          </div>
+        </div>
+
+        {/* Templates button */}
+        <Tooltip>
+          <TooltipProvider>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-primary shrink-0 hidden md:flex"
+                onClick={() => {/* templates shown inline */}}>
+                <LayoutTemplate className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Templates</TooltipContent>
+          </TooltipProvider>
+        </Tooltip>
+
+        {/* Toolbar actions */}
+        <div className="hidden md:flex shrink-0">
+          <ToolbarActions />
+        </div>
+
+        {/* Mobile overflow menu */}
+        <div className="flex md:hidden shrink-0">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-9 w-9"><MoreVertical className="w-4 h-4" /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem onClick={() => user ? setShowSave(true) : toast({ title: "Sign in required" })} disabled={!htmlContent}>
+                <Save className="w-4 h-4 mr-2" /> Save
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleMagicWand} disabled={!htmlContent}>
+                <Wand2 className="w-4 h-4 mr-2" /> Magic Wand
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={copyCode} disabled={!htmlContent}>
+                <Copy className="w-4 h-4 mr-2" /> Copy HTML
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleDownload} disabled={!htmlContent || isZipping}>
+                <PackageOpen className="w-4 h-4 mr-2" /> Download ZIP
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => requireAuthAndPremium(() => setShowVercel(true))} disabled={!htmlContent}>
+                <svg className="w-4 h-4 mr-2" viewBox="0 0 76 65" fill="currentColor"><path d="M37.5274 0L75.0548 65H0L37.5274 0Z" /></svg>
+                Deploy to Vercel
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        <ThemeToggle />
+        <UserMenu />
+      </header>
+
+      {/* ── TEMPLATE PICKER STRIP ─────────────────────────────────────────── */}
+      <div className="border-b border-border/20 px-4 py-1.5 bg-background/60 shrink-0 hidden md:block">
+        <TemplatesPicker onSelect={p => { setPrompt(p); textareaRef.current?.focus(); }} />
+      </div>
+
+      {/* ── ERROR BANNER ─────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {status === "error" && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+            className="px-4 py-2 bg-destructive/10 border-b border-destructive/20 flex items-center gap-3 text-sm text-destructive shrink-0">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span className="flex-1 min-w-0 truncate">{errorMessage}</span>
+            <Button variant="ghost" size="sm" className="h-7 text-xs border-destructive/30 hover:bg-destructive/10 text-destructive shrink-0"
+              onClick={() => handleGenerate(lastPrompt)}>Retry</Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive/60 hover:text-destructive shrink-0"
+              onClick={() => setStatus("idle")}>✕</Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── FACTORY FLOOR ─────────────────────────────────────────────────── */}
       {isMobile ? (
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col w-full">
+        /* Mobile: tabs */
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
           <div className="flex-1 overflow-hidden min-h-0">
-            <TabsContent value="compose" className="h-full m-0 data-[state=active]:flex flex-col overflow-hidden">
-              <ComposePane />
+            <TabsContent value="compose" className="h-full m-0 data-[state=active]:flex flex-col overflow-hidden bg-background p-4 gap-3">
+              <TemplatesPicker onSelect={p => setPrompt(p)} />
+              <div className="text-xs text-muted-foreground text-center py-4">Use the prompt bar above to generate your website</div>
+            </TabsContent>
+            <TabsContent value="code" className="h-full m-0 data-[state=active]:flex flex-col overflow-hidden">
+              <CodePanel />
             </TabsContent>
             <TabsContent value="preview" className="h-full m-0 data-[state=active]:flex flex-col overflow-hidden">
-              <PreviewPane />
+              <PreviewPanel />
             </TabsContent>
           </div>
-          {/* Mobile bottom tab bar */}
-          <div className="h-14 bg-background/95 backdrop-blur-sm border-t border-border/50 flex items-center px-4 shrink-0">
-            <TabsList className="grid w-full grid-cols-2 bg-transparent h-10">
-              <TabsTrigger value="compose" className="rounded-xl data-[state=active]:bg-primary/10 data-[state=active]:text-primary font-medium text-sm">
-                <Sparkles className="w-4 h-4 mr-1.5" /> Compose
-              </TabsTrigger>
-              <TabsTrigger value="preview" className="rounded-xl data-[state=active]:bg-primary/10 data-[state=active]:text-primary font-medium text-sm">
-                Preview
-                {(status === "thinking" || status === "streaming") && <div className="ml-2 w-2 h-2 rounded-full bg-primary animate-pulse shrink-0" />}
-              </TabsTrigger>
+          <div className="h-12 bg-background/95 backdrop-blur-sm border-t border-border/40 flex items-center px-4 shrink-0">
+            <TabsList className="grid w-full grid-cols-3 bg-transparent h-9">
+              {[
+                { value: "compose", label: "Compose", icon: <Sparkles className="w-3.5 h-3.5" /> },
+                { value: "code", label: "Code", icon: <Code className="w-3.5 h-3.5" /> },
+                { value: "preview", label: "Preview", icon: (status === "thinking" || status === "streaming") ? <div className="w-3.5 h-3.5 rounded-full bg-primary animate-pulse" /> : <Monitor className="w-3.5 h-3.5" /> },
+              ].map(({ value, label, icon }) => (
+                <TabsTrigger key={value} value={value} className="rounded-lg data-[state=active]:bg-primary/10 data-[state=active]:text-primary font-semibold text-xs flex items-center gap-1.5">
+                  {icon} {label}
+                </TabsTrigger>
+              ))}
             </TabsList>
           </div>
         </Tabs>
       ) : (
-        <>
-          <ComposePane />
-          <PreviewPane />
-        </>
+        /* Desktop: side-by-side factory floor */
+        <div className="flex-1 flex overflow-hidden min-h-0">
+          {/* Left: Code panel */}
+          <AnimatePresence>
+            {showCode && (
+              <motion.div
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: "50%", opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="border-r border-border/30 flex flex-col shrink-0 min-w-0 overflow-hidden"
+                style={{ width: "50%" }}
+              >
+                <CodePanel />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Right: Preview panel */}
+          <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+            <PreviewPanel />
+          </div>
+        </div>
       )}
 
+      {/* ── STATUS BAR ────────────────────────────────────────────────────── */}
+      <footer className="h-7 border-t border-border/20 flex items-center justify-between px-4 text-[11px] text-muted-foreground bg-background/80 shrink-0 gap-3">
+        <div className="flex items-center gap-2">
+          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+            status === "idle" ? "bg-muted-foreground/30"
+            : status === "error" ? "bg-destructive"
+            : "bg-primary animate-pulse shadow-[0_0_5px_rgba(255,215,0,0.8)]"
+          }`} />
+          {status === "idle" && <span>Ready</span>}
+          {status === "thinking" && <span className="text-primary">Thinking…</span>}
+          {status === "streaming" && <span className="text-primary">● Streaming…</span>}
+          {status === "error" && <span className="text-destructive">Error</span>}
+        </div>
+
+        {/* Key monitor — 6 slots */}
+        <div className="flex items-center gap-1" title="Gemini key slots">
+          {keyMonitor.slots.map((slot: KeySlotInfo) => (
+            <div
+              key={slot.slot}
+              title={`Key ${slot.slot}: ${slot.health === "unconfigured" ? "not configured" : slot.health === "limited" ? "rate limited" : slot.active ? "active" : "standby"}`}
+              className={`w-3 h-1.5 rounded-full transition-all ${
+                slot.health === "unconfigured" ? "bg-border/30"
+                : slot.health === "limited" ? "bg-yellow-500/60"
+                : slot.health === "error" ? "bg-destructive/60"
+                : slot.active && (status === "thinking" || status === "streaming")
+                ? "bg-primary key-active shadow-[0_0_5px_rgba(255,215,0,0.8)]"
+                : slot.active ? "bg-primary shadow-[0_0_3px_rgba(255,215,0,0.5)]"
+                : "bg-primary/25"
+              }`}
+            />
+          ))}
+          <span className="ml-1 text-muted-foreground/50">
+            {keyMonitor.configured}/6 keys
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {sitemap && <span className="text-primary/60 flex items-center gap-1"><Globe2 className="w-2.5 h-2.5" />sitemap</span>}
+          {robotsTxt && <span className="text-emerald-500/60 flex items-center gap-1"><FileSearch className="w-2.5 h-2.5" />robots</span>}
+          {autoSaveStatus === "saving" && <><Loader2 className="w-2.5 h-2.5 animate-spin" />Saving</>}
+          {autoSaveStatus === "saved" && <><CheckCircle2 className="w-2.5 h-2.5 text-primary" />Saved</>}
+          {autoSaveStatus === "idle" && user && currentProjectId && <><Cloud className="w-2.5 h-2.5" />Synced</>}
+        </div>
+      </footer>
+
+      {/* ── MODALS ───────────────────────────────────────────────────────── */}
       <PricingModal open={showPricing} onOpenChange={setShowPricing} />
       <VercelDeployModal open={showVercel} onOpenChange={setShowVercel} html={htmlContent} title={currentProjectTitle} />
       <SaveProjectModal
@@ -874,7 +922,7 @@ export default function Dashboard() {
         projectId={currentProjectId} title={currentProjectTitle}
         prompt={lastPrompt || prompt} html={htmlContent}
         initialSlug={currentSharedSlug}
-        onShared={(slug) => setCurrentSharedSlug(slug)}
+        onShared={slug => setCurrentSharedSlug(slug)}
       />
     </div>
   );

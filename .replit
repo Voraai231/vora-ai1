@@ -72,3 +72,12 @@ externalPort = 3000
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+VITE_GEMINI_API_KEY_2 = "AIzaSyBfRxRSihabmjIsFglDnkgEncLEVmCcNro"
+VITE_GEMINI_API_KEY_3 = "AIzaSyCkkIGUtmUtlDbpH72m8OJ-A8tieiAk9zs"
+VITE_GEMINI_API_KEY_4 = "AIzaSyABmF9TwApaAVNWdblk59qIDvZ0jwIMlJw"
+VITE_GEMINI_API_KEY_5 = "AIzaSyBsCHCTzoftDLvHrbw7wnQelW4oV4wyDZQ"
+VITE_GEMINI_API_KEY_6 = "AIzaSyAdAUKfQQ2bbTi7X9ODhhn2wC-V1q2zuXw"

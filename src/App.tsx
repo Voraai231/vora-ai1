@@ -10,6 +10,7 @@ import SharedProject from "@/pages/SharedProject";
 import Admin from "@/pages/Admin";
 import ContentStudio from "@/pages/ContentStudio";
 import Learn from "@/pages/Learn";
+import AuthPage from "@/pages/AuthPage";
 import NotFound from "@/pages/not-found";
 import { AIChatBot } from "@/components/AIChatBot";
 
@@ -24,6 +25,7 @@ function App() {
             <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
               <Switch>
                 <Route path="/" component={Dashboard} />
+                <Route path="/auth" component={AuthPage} />
                 <Route path="/projects" component={Projects} />
                 <Route path="/p/:slug" component={SharedProject} />
                 <Route path="/admin" component={Admin} />
