@@ -1,3 +1,26 @@
 <svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
-<rect width="180" height="180" rx="36" fill="#FF3C00"/>
+  <rect width="180" height="180" rx="36" fill="#050505"/>
+  <ellipse cx="90" cy="90" rx="64" ry="64" fill="url(#fg)" opacity="0.12"/>
+  <path d="M90 44L46 68L90 92L134 68L90 44Z" fill="url(#p1)" stroke="url(#ps)" stroke-width="2"/>
+  <path d="M46 90L90 114L134 90" stroke="url(#ps)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M46 114L90 138L134 114" stroke="url(#ps2)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.5"/>
+  <defs>
+    <radialGradient id="fg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00E5FF"/>
+      <stop offset="100%" stop-color="#050505"/>
+    </radialGradient>
+    <linearGradient id="p1" x1="46" y1="44" x2="134" y2="92" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F0EFED"/>
+      <stop offset="50%" stop-color="#E5E4E2"/>
+      <stop offset="100%" stop-color="#C8C7C5"/>
+    </linearGradient>
+    <linearGradient id="ps" x1="46" y1="68" x2="134" y2="92" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F0EFED"/>
+      <stop offset="100%" stop-color="#C8C7C5"/>
+    </linearGradient>
+    <linearGradient id="ps2" x1="46" y1="114" x2="134" y2="114" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#A0A09E"/>
+      <stop offset="100%" stop-color="#787876"/>
+    </linearGradient>
+  </defs>
 </svg>

@@ -1,0 +1,55 @@
+{
+  "name": "Vora AI — Website Builder",
+  "short_name": "Vora AI",
+  "description": "Turn a single sentence into a fully-coded, SEO-optimised website in seconds. Powered by Gemini 2.5 Flash.",
+  "start_url": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#050505",
+  "theme_color": "#050505",
+  "orientation": "portrait-primary",
+  "categories": ["productivity", "utilities", "business"],
+  "lang": "en",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/maskable-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/opengraph.jpg",
+      "sizes": "1200x630",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "Vora AI Website Builder"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Build a Website",
+      "short_name": "Build",
+      "description": "Open the AI website builder",
+      "url": "/build",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "My Projects",
+      "short_name": "Projects",
+      "description": "View all saved projects",
+      "url": "/projects",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any" }]
+    }
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false
+}

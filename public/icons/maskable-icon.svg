@@ -1,0 +1,28 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Full bleed dark bg for maskable -->
+  <rect width="512" height="512" fill="#050505"/>
+  <ellipse cx="256" cy="256" rx="160" ry="160" fill="url(#mglow)" opacity="0.14"/>
+  <!-- Safe zone: icon centered with 20% padding (keep content in 307x307 center) -->
+  <path d="M256 152L160 202L256 252L352 202L256 152Z" fill="url(#mplat1)" stroke="url(#mplatS)" stroke-width="4"/>
+  <path d="M160 252L256 302L352 252" stroke="url(#mplatS)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M160 302L256 352L352 302" stroke="url(#mplatS2)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.55"/>
+  <defs>
+    <radialGradient id="mglow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00E5FF"/>
+      <stop offset="100%" stop-color="#050505"/>
+    </radialGradient>
+    <linearGradient id="mplat1" x1="160" y1="152" x2="352" y2="252" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F0EFED"/>
+      <stop offset="50%" stop-color="#E5E4E2"/>
+      <stop offset="100%" stop-color="#C8C7C5"/>
+    </linearGradient>
+    <linearGradient id="mplatS" x1="160" y1="202" x2="352" y2="252" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F0EFED"/>
+      <stop offset="100%" stop-color="#C8C7C5"/>
+    </linearGradient>
+    <linearGradient id="mplatS2" x1="160" y1="302" x2="352" y2="302" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#A0A09E"/>
+      <stop offset="100%" stop-color="#787876"/>
+    </linearGradient>
+  </defs>
+</svg>

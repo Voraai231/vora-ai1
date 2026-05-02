@@ -1,0 +1,28 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="112" fill="#050505"/>
+  <!-- Ice blue glow -->
+  <ellipse cx="256" cy="256" rx="180" ry="180" fill="url(#glow)" opacity="0.12"/>
+  <!-- Vora layers icon — platinum silver -->
+  <path d="M256 128L136 192L256 256L376 192L256 128Z" fill="url(#plat1)" stroke="url(#platStroke)" stroke-width="4"/>
+  <path d="M136 256L256 320L376 256" stroke="url(#platStroke)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M136 320L256 384L376 320" stroke="url(#platStroke2)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.55"/>
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00E5FF"/>
+      <stop offset="100%" stop-color="#050505"/>
+    </radialGradient>
+    <linearGradient id="plat1" x1="136" y1="128" x2="376" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F0EFED"/>
+      <stop offset="50%" stop-color="#E5E4E2"/>
+      <stop offset="100%" stop-color="#C8C7C5"/>
+    </linearGradient>
+    <linearGradient id="platStroke" x1="136" y1="192" x2="376" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F0EFED"/>
+      <stop offset="100%" stop-color="#C8C7C5"/>
+    </linearGradient>
+    <linearGradient id="platStroke2" x1="136" y1="320" x2="376" y2="320" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#A0A09E"/>
+      <stop offset="100%" stop-color="#787876"/>
+    </linearGradient>
+  </defs>
+</svg>
