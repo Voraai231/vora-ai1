@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { GoogleGenAI } from "@google/genai";
+import { createGeminiClient, getKeyMonitorInfo, checkRateLimit, consumeRateSlot, KeySlotInfo } from "@/lib/gemini";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTier } from "@/hooks/useTier";
@@ -37,32 +37,83 @@ import { isRootOwner } from "@/hooks/useTier";
 const FREE_BUILD_LIMIT = 3;
 const BUILDS_KEY = "vora.free_builds";
 
-const SYSTEM_PROMPT = `You are Vora AI, an elite frontend engineer that outputs production-quality websites.
+const SYSTEM_PROMPT = `You are Vora AI, an elite frontend engineer that outputs production-quality, SEO-optimised websites.
 
 OUTPUT CONTRACT — NON-NEGOTIABLE:
 - Respond with a single complete HTML document and NOTHING ELSE.
-- The very first character of your response MUST be "<" (start of <!DOCTYPE html>).
+- The very first character MUST be "<" (start of <!DOCTYPE html>).
 - The very last character MUST be ">" (end of </html>).
-- DO NOT wrap output in markdown fences (no \`\`\`, no \`\`\`html).
-- DO NOT include any prose, commentary, greetings, explanations, apologies, or notes — before, after, or inside the HTML.
-- DO NOT say "Here is" or "Sure" or anything similar.
+- DO NOT wrap in markdown fences. DO NOT include prose, commentary, or explanations.
 
-DOCUMENT REQUIREMENTS:
-1. Start with <!DOCTYPE html> then <html lang="en"> and a complete <head> and <body>.
-2. The <head> MUST include, in this order:
-   - <meta charset="UTF-8">
-   - <meta name="viewport" content="width=device-width, initial-scale=1.0">
-   - <title>...</title>
-   - <script src="https://cdn.tailwindcss.com"></script>
-   - <link rel="preconnect" href="https://fonts.googleapis.com"> and a Google Fonts <link> for Inter (or another tasteful font).
-3. Use Tailwind utility classes only — do NOT write custom <style> blocks unless absolutely required for animations.
-4. Default theme: rich dark background (slate-950 / zinc-950), high contrast typography, generous spacing, subtle gradients, and a premium feel. Respect the user if they ask for light or a specific palette.
-5. The page MUST be fully responsive (mobile-first, breakpoints at sm/md/lg).
-6. Use only inline SVGs or images from https://placehold.co/<w>x<h>/<bg>/<fg>?text=... — no other external image hosts.
-7. If JavaScript is needed, include it inline in a <script> tag at the end of <body>. Keep it self-contained.
-8. The result must render correctly inside an iframe with sandbox="allow-scripts" — no top-level navigation, no parent access.
+HEAD REQUIREMENTS — include ALL of these in exact order:
+1. <meta charset="UTF-8">
+2. <meta name="viewport" content="width=device-width, initial-scale=1.0">
+3. <title>[Descriptive Title] | Vora AI</title>
+4. <meta name="description" content="[150-160 char SEO description matching the page content]">
+5. <meta name="keywords" content="[6-10 relevant comma-separated keywords]">
+6. <link rel="canonical" href="https://voraai.app">
+7. <!-- Open Graph -->
+   <meta property="og:type" content="website">
+   <meta property="og:title" content="[same as title]">
+   <meta property="og:description" content="[same as description]">
+   <meta property="og:image" content="https://placehold.co/1200x630/080808/FFD700?text=Vora+AI">
+   <meta property="og:url" content="https://voraai.app">
+8. <!-- Twitter Card -->
+   <meta name="twitter:card" content="summary_large_image">
+   <meta name="twitter:title" content="[same as title]">
+   <meta name="twitter:description" content="[same as description]">
+   <meta name="twitter:image" content="https://placehold.co/1200x630/080808/FFD700?text=Vora+AI">
+9. <script src="https://cdn.tailwindcss.com"></script>
+10. Google Fonts preconnect + font link for Inter or tasteful font
+11. <!-- Schema.org JSON-LD -->
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","name":"[title]","description":"[description]","url":"https://voraai.app","publisher":{"@type":"Organization","name":"Vora AI","url":"https://voraai.app"}}</script>
 
-Remember: raw HTML only. Your entire response is fed directly into an iframe srcdoc.`;
+DESIGN REQUIREMENTS:
+- Default: rich dark (slate-950/zinc-950), premium feel, Tailwind only (no custom <style> unless animations needed)
+- Fully responsive, mobile-first (sm/md/lg breakpoints)
+- Images: inline SVGs or https://placehold.co/<w>x<h>/<bg>/<fg>?text=... only
+- JavaScript: inline <script> at end of <body>, self-contained
+- Must render inside iframe with sandbox="allow-scripts"
+
+Remember: raw HTML only. Your entire response is the srcdoc of an iframe.`;
+
+// ─── Code Rain Canvas Animation ────────────────────────────────────────────
+function CodeRain() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const resize = () => { canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight; };
+    resize();
+    const chars = "01アイウエオカキクケコサシスセソタチツテトナニヌネノABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const fontSize = 13;
+    let cols = Math.floor(canvas.width / fontSize);
+    const drops: number[] = Array(cols).fill(1);
+    const draw = () => {
+      ctx.fillStyle = "rgba(8,8,8,0.07)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < drops.length; i++) {
+        const char = chars[Math.floor(Math.random() * chars.length)];
+        const progress = drops[i] / (canvas.height / fontSize);
+        if (progress < 0.3) ctx.fillStyle = "#FFFFFF";
+        else if (progress < 0.6) ctx.fillStyle = "#FFD700";
+        else ctx.fillStyle = "rgba(255,215,0,0.4)";
+        ctx.font = `${fontSize}px 'JetBrains Mono', monospace`;
+        ctx.fillText(char, i * fontSize, drops[i] * fontSize);
+        if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
+        drops[i]++;
+      }
+      cols = Math.floor(canvas.width / fontSize);
+      while (drops.length < cols) drops.push(Math.random() * (canvas.height / fontSize));
+    };
+    const interval = setInterval(draw, 45);
+    window.addEventListener("resize", resize);
+    return () => { clearInterval(interval); window.removeEventListener("resize", resize); };
+  }, []);
+  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full opacity-80" />;
+}
 
 function sanitizeHtml(raw: string): string {
   let html = raw.trim();
@@ -190,12 +241,14 @@ export default function Dashboard() {
       }
     }
 
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-    if (!apiKey) {
+    // Fair-use rate limiter
+    const rl = checkRateLimit();
+    if (!rl.allowed) {
       setStatus("error");
-      setErrorMessage("VITE_GEMINI_API_KEY is missing.");
+      setErrorMessage(`Rate limit reached (15/min). Reset in ${rl.resetInSec}s. This protects your API quota.`);
       return;
     }
+    consumeRateSlot();
 
     setStatus("thinking");
     setErrorMessage("");
@@ -210,7 +263,7 @@ export default function Dashboard() {
     void trackEvent("generation_started", { uid: user?.uid });
 
     try {
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = createGeminiClient();
       const responseStream = await ai.models.generateContentStream({
         model: "gemini-2.5-flash",
         contents: [{ role: "user", parts: [{ text: currentPrompt }] }],
@@ -321,14 +374,14 @@ export default function Dashboard() {
   );
 
   const ComposePane = () => (
-    <div className="w-full md:w-[400px] lg:w-[480px] h-full border-r border-border/50 flex flex-col relative z-10 bg-background/80 backdrop-blur-xl shrink-0">
+    <div className="w-full md:w-[400px] lg:w-[480px] h-full border-r border-border/50 flex flex-col relative z-10 bg-background/80 backdrop-blur-xl shrink-0 ambient-bg">
       {/* Header row — logo + auth always in same line */}
       <div className="h-14 px-4 flex items-center justify-between shrink-0 border-b border-border/30 md:border-0">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center neon-border shrink-0">
+          <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center border breathing-glow shrink-0">
             <VoraIcon className="w-5 h-5 text-primary" />
           </div>
-          <span className="font-bold text-lg tracking-tight shrink-0">Vora AI</span>
+          <span className="font-bold text-lg tracking-tight shrink-0 neon-text">Vora AI</span>
           {currentProjectTitle && (
             <span className="hidden sm:inline px-2 py-0.5 bg-secondary text-xs rounded-md truncate max-w-[100px]">
               {currentProjectTitle}
@@ -415,7 +468,7 @@ export default function Dashboard() {
               <Button
                 onClick={() => handleGenerate()}
                 disabled={!prompt.trim() || status === "thinking" || status === "streaming" || isLimited}
-                className="bg-primary text-primary-foreground hover:bg-primary/90 font-semibold rounded-full px-5 h-9 shadow-[0_0_15px_rgba(0,255,255,0.3)] hover:shadow-[0_0_25px_rgba(0,255,255,0.5)] transition-all text-sm"
+                className="laser-hover bg-primary text-primary-foreground hover:bg-primary/90 font-bold rounded-full px-5 h-9 shadow-[0_0_20px_rgba(255,215,0,0.4)] hover:shadow-[0_0_35px_rgba(255,215,0,0.7)] transition-all text-sm tracking-wide"
               >
                 {(status === "thinking" || status === "streaming")
                   ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> Building…</>
@@ -444,24 +497,40 @@ export default function Dashboard() {
         </AnimatePresence>
       </div>
 
-      {/* Status footer */}
-      <div className="h-9 px-4 border-t border-border/30 flex items-center justify-between text-xs text-muted-foreground shrink-0">
+      {/* Status footer + Key Monitor */}
+      <div className="px-4 py-1.5 border-t border-border/30 flex items-center justify-between text-xs text-muted-foreground shrink-0 gap-2">
         <div className="flex items-center gap-2">
-          <div className={`w-1.5 h-1.5 rounded-full ${status === "idle" ? "bg-muted-foreground/30" : status === "error" ? "bg-destructive" : "bg-primary animate-pulse shadow-[0_0_6px_rgba(0,255,255,0.8)]"}`} />
+          <div className={`w-1.5 h-1.5 rounded-full ${status === "idle" ? "bg-muted-foreground/30" : status === "error" ? "bg-destructive" : "bg-primary animate-pulse shadow-[0_0_6px_rgba(255,215,0,0.9)]"}`} />
           {status === "idle" && "Ready"}
-          {status === "thinking" && "Thinking…"}
-          {status === "streaming" && "Building…"}
-          {status === "error" && "Error"}
+          {status === "thinking" && <span className="text-primary">Thinking…</span>}
+          {status === "streaming" && <span className="text-primary animate-pulse">● Building…</span>}
+          {status === "error" && <span className="text-destructive">Error</span>}
         </div>
-        {user && htmlContent && autoSaveStatus !== "idle" && (
-          <div className="flex items-center gap-1">
-            {autoSaveStatus === "saving" && <><Loader2 className="w-3 h-3 animate-spin" /> Saving</>}
-            {autoSaveStatus === "saved" && <><CheckCircle2 className="w-3 h-3 text-primary" /> Saved</>}
-          </div>
-        )}
-        {user && htmlContent && autoSaveStatus === "idle" && currentProjectId && (
-          <div className="flex items-center gap-1"><Cloud className="w-3 h-3" /> Synced</div>
-        )}
+
+        {/* API Key Monitor — 6 slots */}
+        <div className="flex items-center gap-1" title="Gemini API key slots">
+          {getKeyMonitorInfo().slots.map((slot: KeySlotInfo) => (
+            <div
+              key={slot.slot}
+              title={`Key ${slot.slot}: ${slot.configured ? (slot.active ? "ACTIVE" : "standby") : "not configured"}`}
+              className={`w-3 h-1.5 rounded-full transition-all ${
+                !slot.configured
+                  ? "bg-border/40"
+                  : slot.active && (status === "thinking" || status === "streaming")
+                  ? "bg-primary key-active shadow-[0_0_6px_rgba(255,215,0,0.8)]"
+                  : slot.active
+                  ? "bg-primary shadow-[0_0_4px_rgba(255,215,0,0.5)]"
+                  : "bg-primary/30"
+              }`}
+            />
+          ))}
+        </div>
+
+        <div className="flex items-center gap-1">
+          {autoSaveStatus === "saving" && <><Loader2 className="w-3 h-3 animate-spin" /> Saving</>}
+          {autoSaveStatus === "saved" && <><CheckCircle2 className="w-3 h-3 text-primary" /> Saved</>}
+          {autoSaveStatus === "idle" && user && currentProjectId && <><Cloud className="w-3 h-3" /> Synced</>}
+        </div>
       </div>
     </div>
   );
@@ -680,7 +749,7 @@ export default function Dashboard() {
           <div className="flex-1 flex justify-center items-start overflow-auto p-2 md:p-6">
             <motion.div
               layout
-              className={`relative bg-white rounded-lg md:rounded-xl overflow-hidden transition-all duration-500 shadow-xl md:shadow-2xl ring-1 ring-border/50 ${status === "streaming" ? "ring-primary/50 shadow-[0_0_20px_rgba(0,255,255,0.1)]" : ""} ${!htmlContent ? "bg-transparent ring-0 shadow-none" : ""}`}
+              className={`relative bg-white rounded-lg md:rounded-xl overflow-hidden transition-all duration-500 shadow-xl md:shadow-2xl ring-1 ring-border/50 ${status === "streaming" ? "ring-primary/60 shadow-[0_0_30px_rgba(255,215,0,0.15)]" : ""} ${!htmlContent ? "bg-transparent ring-0 shadow-none" : ""}`}
               style={{
                 width: "100%",
                 maxWidth: isMobile ? "100%" : deviceWidth === "mobile" ? "390px" : deviceWidth === "tablet" ? "768px" : "100%",
@@ -689,9 +758,9 @@ export default function Dashboard() {
             >
               <iframe
                 ref={iframeRef}
-                key="vora-preview-iframe"
+                key={htmlContent ? `preview-${htmlContent.length}` : "preview-empty"}
                 srcDoc={htmlContent || "<!doctype html><html><body style=\"margin:0;background:transparent\"></body></html>"}
-                className={`w-full h-full min-h-[400px] bg-white ${!htmlContent ? "opacity-0 pointer-events-none" : ""}`}
+                className={`w-full h-full min-h-[400px] bg-white ${!htmlContent ? "opacity-0 pointer-events-none" : "materialize"}`}
                 sandbox="allow-scripts"
                 title="Preview"
                 style={{ minHeight: isMobile ? "calc(100vh - 120px)" : "100%" }}
@@ -712,10 +781,15 @@ export default function Dashboard() {
                   </motion.div>
                 </div>
               )}
-              {status === "thinking" && !htmlContent && (
-                <div className="absolute inset-0 flex items-center justify-center bg-background/40 backdrop-blur-sm rounded-xl pointer-events-none">
-                  <div className="flex items-center gap-3 px-5 py-2.5 rounded-full border border-primary/30 bg-background/80 text-sm text-primary shadow-[0_0_20px_rgba(0,255,255,0.2)]">
-                    <Loader2 className="w-4 h-4 animate-spin" /> Booting up Gemini…
+              {(status === "thinking" || (status === "streaming" && !htmlContent)) && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#080808] rounded-xl pointer-events-none overflow-hidden">
+                  <CodeRain />
+                  <div className="absolute flex flex-col items-center gap-3 z-10">
+                    <div className="flex items-center gap-3 px-6 py-3 rounded-full border border-primary/50 bg-black/80 backdrop-blur-sm text-sm font-bold text-primary shadow-[0_0_30px_rgba(255,215,0,0.4)] tracking-widest uppercase">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      {status === "thinking" ? "Igniting Engine…" : "Streaming…"}
+                    </div>
+                    <p className="text-primary/50 text-xs font-mono tracking-widest">VORA AI — GEMINI 2.5 FLASH</p>
                   </div>
                 </div>
               )}

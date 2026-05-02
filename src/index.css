@@ -55,42 +55,42 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* ─── THEME 1: Vora Dark (default) ─────────────────────────────── */
+/* ─── THEME 1: Vora Dark — Neon Gold Edition ───────────────────── */
 :root,
 :root[data-theme="vora-dark"] {
-  --background: 240 10% 4%;
-  --foreground: 0 0% 98%;
-  --border: 240 10% 12%;
-  --input: 240 10% 16%;
-  --ring: 180 100% 50%;
-  --card: 240 10% 6%;
-  --card-foreground: 0 0% 98%;
-  --card-border: 240 10% 12%;
-  --popover: 240 10% 6%;
-  --popover-foreground: 0 0% 98%;
-  --popover-border: 240 10% 12%;
-  --primary: 180 100% 50%;
-  --primary-foreground: 240 10% 4%;
-  --secondary: 240 10% 12%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 240 10% 12%;
-  --muted-foreground: 240 5% 65%;
-  --accent: 180 100% 50%;
-  --accent-foreground: 240 10% 4%;
+  --background: 0 0% 3%;
+  --foreground: 0 0% 97%;
+  --border: 0 0% 11%;
+  --input: 0 0% 14%;
+  --ring: 51 100% 50%;
+  --card: 0 0% 5%;
+  --card-foreground: 0 0% 97%;
+  --card-border: 0 0% 11%;
+  --popover: 0 0% 5%;
+  --popover-foreground: 0 0% 97%;
+  --popover-border: 0 0% 11%;
+  --primary: 51 100% 50%;
+  --primary-foreground: 0 0% 3%;
+  --secondary: 0 0% 10%;
+  --secondary-foreground: 0 0% 90%;
+  --muted: 0 0% 10%;
+  --muted-foreground: 0 0% 55%;
+  --accent: 51 100% 50%;
+  --accent-foreground: 0 0% 3%;
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 98%;
-  --sidebar: 240 10% 6%;
-  --sidebar-foreground: 0 0% 98%;
-  --sidebar-border: 240 10% 12%;
-  --sidebar-primary: 180 100% 50%;
-  --sidebar-primary-foreground: 240 10% 4%;
-  --sidebar-accent: 240 10% 12%;
-  --sidebar-accent-foreground: 0 0% 98%;
-  --sidebar-ring: 180 100% 50%;
-  --chart-1: 180 100% 50%;
-  --chart-2: 220 70% 60%;
+  --sidebar: 0 0% 5%;
+  --sidebar-foreground: 0 0% 97%;
+  --sidebar-border: 0 0% 11%;
+  --sidebar-primary: 51 100% 50%;
+  --sidebar-primary-foreground: 0 0% 3%;
+  --sidebar-accent: 0 0% 10%;
+  --sidebar-accent-foreground: 0 0% 90%;
+  --sidebar-ring: 51 100% 50%;
+  --chart-1: 51 100% 50%;
+  --chart-2: 38 92% 55%;
   --chart-3: 280 65% 60%;
-  --chart-4: 50 90% 55%;
+  --chart-4: 160 60% 45%;
   --chart-5: 0 84% 60%;
   --app-font-sans: 'Inter', sans-serif;
   --app-font-serif: Georgia, serif;
@@ -99,25 +99,25 @@
 }
 
 .dark {
-  --background: 240 10% 4%;
-  --foreground: 0 0% 98%;
-  --border: 240 10% 12%;
-  --input: 240 10% 16%;
-  --ring: 180 100% 50%;
-  --card: 240 10% 6%;
-  --card-foreground: 0 0% 98%;
-  --card-border: 240 10% 12%;
-  --popover: 240 10% 6%;
-  --popover-foreground: 0 0% 98%;
-  --popover-border: 240 10% 12%;
-  --primary: 180 100% 50%;
-  --primary-foreground: 240 10% 4%;
-  --secondary: 240 10% 12%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 240 10% 12%;
-  --muted-foreground: 240 5% 65%;
-  --accent: 180 100% 50%;
-  --accent-foreground: 240 10% 4%;
+  --background: 0 0% 3%;
+  --foreground: 0 0% 97%;
+  --border: 0 0% 11%;
+  --input: 0 0% 14%;
+  --ring: 51 100% 50%;
+  --card: 0 0% 5%;
+  --card-foreground: 0 0% 97%;
+  --card-border: 0 0% 11%;
+  --popover: 0 0% 5%;
+  --popover-foreground: 0 0% 97%;
+  --popover-border: 0 0% 11%;
+  --primary: 51 100% 50%;
+  --primary-foreground: 0 0% 3%;
+  --secondary: 0 0% 10%;
+  --secondary-foreground: 0 0% 90%;
+  --muted: 0 0% 10%;
+  --muted-foreground: 0 0% 55%;
+  --accent: 51 100% 50%;
+  --accent-foreground: 0 0% 3%;
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 98%;
 }
@@ -228,13 +228,86 @@
 ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
 
-/* Neon utilities (Vora Dark) */
+/* Neon utilities — Neon Gold */
 .neon-border {
-  box-shadow: 0 0 10px hsl(var(--primary) / 0.3), inset 0 0 10px hsl(var(--primary) / 0.1);
-  border-color: hsl(var(--primary) / 0.5);
+  box-shadow: 0 0 12px hsl(var(--primary) / 0.4), 0 0 30px hsl(var(--primary) / 0.15), inset 0 0 12px hsl(var(--primary) / 0.08);
+  border-color: hsl(var(--primary) / 0.6);
 }
 .neon-text {
-  text-shadow: 0 0 10px hsl(var(--primary) / 0.5);
+  text-shadow: 0 0 12px hsl(var(--primary) / 0.7), 0 0 30px hsl(var(--primary) / 0.4);
+}
+
+/* Breathing Glow — logo pulse */
+@keyframes breathing-glow {
+  0%, 100% {
+    box-shadow: 0 0 8px hsl(51 100% 50% / 0.3), 0 0 20px hsl(51 100% 50% / 0.1);
+    border-color: hsl(51 100% 50% / 0.4);
+  }
+  50% {
+    box-shadow: 0 0 20px hsl(51 100% 50% / 0.7), 0 0 50px hsl(51 100% 50% / 0.3), 0 0 80px hsl(51 100% 50% / 0.15);
+    border-color: hsl(51 100% 50% / 0.9);
+  }
+}
+.breathing-glow {
+  animation: breathing-glow 2.4s ease-in-out infinite;
+}
+
+/* Gold laser border hover */
+@keyframes laser-scan {
+  0% { background-position: -100% 0; }
+  100% { background-position: 200% 0; }
+}
+.laser-hover {
+  position: relative;
+  overflow: hidden;
+}
+.laser-hover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 40%, hsl(51 100% 50% / 0.25) 50%, transparent 60%);
+  background-size: 200% 100%;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+.laser-hover:hover::after {
+  opacity: 1;
+  animation: laser-scan 0.7s ease-out forwards;
+}
+
+/* Materialize effect — iframe reveal */
+@keyframes materialize {
+  0% { opacity: 0; transform: scale(0.97) translateY(6px); filter: blur(4px); }
+  60% { opacity: 0.9; filter: blur(0px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); filter: blur(0px); }
+}
+.materialize {
+  animation: materialize 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Moving gradient background */
+@keyframes bg-drift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+.ambient-bg {
+  background: radial-gradient(ellipse at 20% 50%, hsl(51 100% 50% / 0.04) 0%, transparent 60%),
+              radial-gradient(ellipse at 80% 20%, hsl(38 92% 55% / 0.03) 0%, transparent 50%),
+              radial-gradient(ellipse at 60% 80%, hsl(51 100% 50% / 0.02) 0%, transparent 50%);
+  animation: bg-drift 12s ease infinite;
+  background-size: 200% 200%;
+}
+
+/* API Key blink */
+@keyframes key-blink {
+  0%, 100% { opacity: 1; }
+  45% { opacity: 1; }
+  50% { opacity: 0.15; }
+  55% { opacity: 1; }
+}
+.key-active {
+  animation: key-blink 1.6s ease-in-out infinite;
 }
 
 /* Glass surface utility */
