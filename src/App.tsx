@@ -4,6 +4,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import LandingPage from "@/pages/LandingPage";
+import HomePage from "@/pages/HomePage";
 import Dashboard from "@/pages/Dashboard";
 import Projects from "@/pages/Projects";
 import SharedProject from "@/pages/SharedProject";
@@ -24,7 +26,9 @@ function App() {
           <TooltipProvider>
             <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
               <Switch>
-                <Route path="/" component={Dashboard} />
+                <Route path="/" component={LandingPage} />
+                <Route path="/home" component={HomePage} />
+                <Route path="/build" component={Dashboard} />
                 <Route path="/auth" component={AuthPage} />
                 <Route path="/projects" component={Projects} />
                 <Route path="/p/:slug" component={SharedProject} />
