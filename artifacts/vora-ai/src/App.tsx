@@ -13,6 +13,10 @@ import Admin from "@/pages/Admin";
 import ContentStudio from "@/pages/ContentStudio";
 import Learn from "@/pages/Learn";
 import AuthPage from "@/pages/AuthPage";
+import PricingPage from "@/pages/PricingPage";
+import TermsPage from "@/pages/TermsPage";
+import PrivacyPage from "@/pages/PrivacyPage";
+import RefundPage from "@/pages/RefundPage";
 import NotFound from "@/pages/not-found";
 import { AIChatBot } from "@/components/AIChatBot";
 
@@ -35,6 +39,10 @@ function App() {
                 <Route path="/admin" component={Admin} />
                 <Route path="/studio" component={ContentStudio} />
                 <Route path="/learn" component={Learn} />
+                <Route path="/pricing" component={PricingPage} />
+                <Route path="/terms" component={TermsPage} />
+                <Route path="/privacy" component={PrivacyPage} />
+                <Route path="/refund" component={RefundPage} />
                 <Route component={NotFound} />
               </Switch>
             </WouterRouter>

@@ -12,6 +12,7 @@ import { getProject, saveProject, updateProject } from "@/lib/projects";
 import { useZipExport } from "@/hooks/useZipExport";
 import { VoraIcon } from "@/components/VoraIcon";
 import { PricingModal } from "@/components/PricingModal";
+import { BinancePayModal } from "@/components/BinancePayModal";
 import { VercelDeployModal } from "@/components/VercelDeployModal";
 import { SaveProjectModal } from "@/components/SaveProjectModal";
 import { PromoteModal } from "@/components/PromoteModal";
@@ -163,6 +164,7 @@ export default function Dashboard() {
   const [currentSharedSlug, setCurrentSharedSlug] = useState<string | null>(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [showPricing, setShowPricing] = useState(false);
+  const [showBinance, setShowBinance] = useState(false);
   const [showVercel, setShowVercel] = useState(false);
   const [showSave, setShowSave] = useState(false);
   const [showPromote, setShowPromote] = useState(false);
@@ -265,7 +267,7 @@ export default function Dashboard() {
   const handleGenerate = async (currentPrompt: string = prompt, sysPrompt: string = SYSTEM_PROMPT) => {
     if (!currentPrompt.trim()) return;
     if (tier === "starter" && sysPrompt === SYSTEM_PROMPT && freeBuildCount >= FREE_BUILD_LIMIT && !isRootOwnerUser) {
-      setShowPricing(true); return;
+      setShowBinance(true); return;
     }
     const rl = checkRateLimit();
     if (!rl.allowed) {
@@ -309,14 +311,14 @@ export default function Dashboard() {
   };
 
   const handleMagicWand = () => {
-    if (tier === "starter") { setShowPricing(true); return; }
+    if (tier === "starter" && !isRootOwnerUser) { setShowBinance(true); return; }
     void trackEvent("magic_wand_used", { uid: user?.uid });
     handleGenerate("Audit this HTML for UI bugs and return a FIXED full HTML. Output only raw HTML.\n\nHTML:\n" + htmlContent, "Return ONLY raw HTML. Fix all issues.");
     toast({ title: "Magic Wand activated", description: "Fixing layout and accessibility…" });
   };
 
   const handleSEOFix = (issues: string[]) => {
-    if (tier === "starter") { setShowPricing(true); return; }
+    if (tier === "starter" && !isRootOwnerUser) { setShowBinance(true); return; }
     handleGenerate(`Fix these SEO issues:\n${issues.join("\n")}\n\nHTML:\n${htmlContent}`, "Return ONLY raw HTML.");
   };
 
@@ -325,11 +327,14 @@ export default function Dashboard() {
     toast({ title: "Copied!", description: "HTML copied to clipboard." });
   };
 
-  const handleDownload = () => exportZip(htmlContent, lastPrompt, currentProjectTitle || "vora-project");
-  const requirePremium = (fn: () => void) => { if (tier === "starter") setShowPricing(true); else fn(); };
+  const handleDownload = () => {
+    if (tier === "starter" && !isRootOwnerUser) { setShowBinance(true); return; }
+    exportZip(htmlContent, lastPrompt, currentProjectTitle || "vora-project");
+  };
+  const requirePremium = (fn: () => void) => { if (tier === "starter" && !isRootOwnerUser) setShowBinance(true); else fn(); };
   const requireAuthAndPremium = (fn: () => void) => {
     if (!user) toast({ title: "Sign in required" });
-    else if (tier === "starter") setShowPricing(true);
+    else if (tier === "starter" && !isRootOwnerUser) setShowBinance(true);
     else fn();
   };
 
@@ -357,8 +362,8 @@ export default function Dashboard() {
           <DropdownMenuItem onClick={() => setLocation("/learn")} className="cursor-pointer text-xs text-white/55 hover:text-white focus:text-white focus:bg-white/4">
             <BookOpen className="w-3.5 h-3.5 mr-2" /> Learning Hub
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setShowPricing(true)} className="cursor-pointer text-xs text-[#00E5FF]/70 focus:text-[#00E5FF] focus:bg-[#00E5FF]/5">
-            <Crown className="w-3.5 h-3.5 mr-2" /> Plan: {tier.toUpperCase()}
+          <DropdownMenuItem onClick={() => tier === "starter" ? setShowBinance(true) : setShowPricing(true)} className="cursor-pointer text-xs text-[#00E5FF]/70 focus:text-[#00E5FF] focus:bg-[#00E5FF]/5">
+            <Crown className="w-3.5 h-3.5 mr-2" /> Plan: {tier.toUpperCase()}{tier === "starter" && " · Upgrade"}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setLocation("/studio")} className="cursor-pointer text-xs text-white/55 hover:text-white focus:text-white focus:bg-white/4">
             <Clapperboard className="w-3.5 h-3.5 mr-2" /> Content Studio
@@ -388,7 +393,7 @@ export default function Dashboard() {
           { icon: <div className="relative"><Link2 className="w-3.5 h-3.5" />{currentSharedSlug && <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-[#00E5FF]" />}</div>, label: currentSharedSlug ? "Shared" : "Share", onClick: () => { if (!user) toast({ title: "Sign in required" }); else if (!currentProjectId) toast({ title: "Save first" }); else setShowShare(true); }, disabled: !htmlContent },
           { icon: <div className="relative"><Code className="w-3.5 h-3.5" /></div>, label: "Toggle Code", onClick: () => setShowCode(v => !v), disabled: !htmlContent, active: showCode },
           { icon: <Copy className="w-3.5 h-3.5" />, label: "Copy HTML", onClick: copyCode, disabled: !htmlContent },
-          { icon: isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PackageOpen className="w-3.5 h-3.5" />, label: "Download ZIP", onClick: handleDownload, disabled: !htmlContent || isZipping },
+          { icon: isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <div className="relative"><PackageOpen className="w-3.5 h-3.5" />{tier === "starter" && !isRootOwnerUser && <Lock className="w-2 h-2 absolute -top-0.5 -right-0.5 text-[#E5E4E2]" />}</div>, label: tier === "starter" && !isRootOwnerUser ? "Download ZIP (Pro)" : "Download ZIP", onClick: handleDownload, disabled: !htmlContent || isZipping },
           { icon: <div className="relative"><svg className="w-3.5 h-3.5" viewBox="0 0 76 65" fill="currentColor"><path d="M37.5274 0L75.0548 65H0L37.5274 0Z" /></svg>{tier === "starter" && <Lock className="w-2 h-2 absolute -top-0.5 -right-0.5 text-[#E5E4E2]" />}</div>, label: "Deploy to Vercel", onClick: () => requireAuthAndPremium(() => setShowVercel(true)), disabled: !htmlContent },
         ].map(({ icon, label, onClick, disabled, active }) => (
           <Tooltip key={label}>
@@ -566,6 +571,11 @@ export default function Dashboard() {
           <div className="flex items-center gap-1 px-2 py-0.5 rounded-full glass-surface border border-[#E5E4E2]/6 shrink-0">
             <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: iceColor, boxShadow: `0 0 5px ${iceColor}` }} />
             <span className="text-[9px] text-white/25 font-bold uppercase tracking-wider hidden md:block">{health.status}</span>
+          </div>
+          <div className="hidden lg:flex items-center gap-1 px-2 py-0.5 rounded-full shrink-0"
+            style={{ background: "rgba(0,229,255,0.04)", border: "1px solid rgba(0,229,255,0.1)" }}>
+            <Zap className="w-2.5 h-2.5 text-[#00E5FF]/40" />
+            <span className="text-[9px] text-[#00E5FF]/35 font-bold tracking-wider uppercase">6-Key Engine</span>
           </div>
         </div>
 
@@ -764,7 +774,8 @@ export default function Dashboard() {
       </div>
 
       {/* ── MODALS ────────────────────────────────────────────────── */}
-      {showPricing && <PricingModal open={showPricing} onClose={() => setShowPricing(false)} />}
+      {showPricing && <PricingModal open={showPricing} onOpenChange={(o) => setShowPricing(o)} />}
+      {showBinance && <BinancePayModal open={showBinance} onClose={() => setShowBinance(false)} />}
       {showVercel && <VercelDeployModal open={showVercel} onClose={() => setShowVercel(false)} html={htmlContent} title={currentProjectTitle} />}
       {showSave && user && (
         <SaveProjectModal open={showSave} onClose={() => setShowSave(false)}

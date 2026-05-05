@@ -1,102 +1,86 @@
 # Vora AI
 
 ## Overview
-Vora AI is a 4K Ultra-Premium AI-powered website builder. Users speak or type a prompt, and Gemini 2.5 Flash generates a fully SEO-optimised HTML website in real-time. Firebase Auth (Google + Email/Password), Firestore project storage, Razorpay payments, 6-key Gemini load balancer with 429-fallback rotation.
+Vora AI is a PWA AI-powered website builder. Users speak or type a prompt, Gemini 2.5 Flash streams a fully SEO-optimised HTML website in real-time. Firebase Auth, Firestore project storage, Binance Pay (USDT) + Razorpay (INR), 6-key Gemini load balancer, legal pages, and strict pro-tier feature gating.
 
 ## Stack
-- **Framework**: React 19 + Vite 7
-- **Styling**: Tailwind CSS 4 + shadcn/ui — Neon Gold (#FFD700) + Matte Black (#080808) theme
+- **Framework**: React 19 + Vite 7 (PWA via vite-plugin-pwa)
+- **Styling**: Tailwind CSS 4 + shadcn/ui — Midnight Black (#050505) + Silver (#E5E4E2) + Ice Blue (#00E5FF)
 - **AI**: Google Gemini 2.5 Flash (streaming) via `@google/genai`, 6-key rotation with 429 fallback
 - **Auth**: Firebase Auth (Google Sign-In + Email/Password)
-- **Database**: Firestore (projects with SEO data, sitemap, robots.txt, billing, analytics)
-- **Payments**: Razorpay (client-side checkout)
+- **Database**: Firestore (projects, billing, `payment_requests` collection for Binance)
+- **Payments**: Binance Pay USDT ($19/mo, $49 lifetime) + Razorpay INR (₹749/mo, ₹3,999)
 - **Animations**: Framer Motion, Code Rain canvas, Breathing Glow, Laser Hover, Materialize
 - **Router**: Wouter
-- **Build**: Vite with manual chunk splitting
 
 ## Project Structure
 ```
 src/
-  pages/        Dashboard (factory), AuthPage, Projects, Admin, ContentStudio, SharedProject, Learn
-  components/   PricingModal, SaveProjectModal, ShareModal, SEOMaster, AIChatBot, ...
+  pages/        Dashboard, LandingPage, HomePage, AuthPage, Projects, Admin,
+                ContentStudio, SharedProject, Learn,
+                PricingPage, TermsPage, PrivacyPage, RefundPage
+  components/   BinancePayModal, PricingModal, SaveProjectModal, ShareModal,
+                SEOMaster, AIChatBot, VoraIcon, ...
   hooks/        useZipExport, useRazorpay, useTier, useSpeech, ...
-  lib/          firebase, analytics, admin, projects, gemini (6-key+rate-limiter)
-  contexts/     AuthContext (Google + email/password), ThemeContext
-public/         favicon.svg, opengraph.jpg
-index.html
-package.json    scripts: dev, build, preview
-vite.config.ts
-vercel.json     SPA rewrites, pnpm build, dist/ output
+  lib/          firebase, analytics, admin, projects, payments, gemini (6-key+rate-limiter)
+  contexts/     AuthContext, ThemeContext
+public/         favicon.svg, manifest.json, icons/, opengraph.jpg
 ```
 
 ## Routes
-- `/` — Dashboard (Factory Interface: side-by-side Code + Preview)
-- `/auth` — Premium Login/Register page (Google + Email/Password, Code Rain bg)
-- `/projects` — My Projects (with SEO metadata, sitemap/robots badges)
+- `/` — Landing page (PWA install, hero, features, footer with legal links)
+- `/home` — HomePage
+- `/build` — Dashboard (Factory: floating prompt bar, live preview, code panel)
+- `/auth` — Login/Register (Google + Email/Password)
+- `/projects` — My Projects
 - `/p/:slug` — Shared public project
 - `/admin` — Owner Admin Console
 - `/studio` — AI Content Studio
 - `/learn` — Learning Hub
+- `/pricing` — Pricing page ($0 / $19/mo / $49 lifetime, Binance Pay)
+- `/terms` — Terms of Service (13 sections)
+- `/privacy` — Privacy Policy (11 sections, GDPR + Indian IT Act)
+- `/refund` — Refund Policy (eligible/ineligible cases, contact info)
+
+## Binance Pay Flow (src/components/BinancePayModal.tsx)
+- Step 1: Plan select (Pro $19/mo or Pro Lifetime $49)
+- Step 2: Show Binance Pay ID + QR code + TXID input
+- Step 3: Submit → `payment_requests` Firestore collection → success screen
+- Success message: "Transaction received! We are verifying your crypto payment. Access will be granted shortly."
+- **Replace `YOUR_BINANCE_PAY_ID_HERE`** in BinancePayModal.tsx with actual Pay ID
+
+## Pro Feature Gating (Dashboard.tsx)
+- Starters hitting build limit → BinancePayModal (was PricingModal)
+- ZIP Export → locked for starter tier → BinancePayModal on click
+- Magic Wand, SEO Master, Vercel Deploy → locked for starter → BinancePayModal
+- Lock icon overlaid on toolbar buttons for locked features
+- User menu "Plan: STARTER · Upgrade" → opens BinancePayModal
+
+## 6-Key Engine Branding
+- Header shows: health dot (GREEN/YELLOW/RED) + `6-KEY ENGINE` chip (ice blue)
+- Key slots visualised in floating prompt bar (6 bars, active = glowing)
 
 ## Gemini 6-Key Load Balancer (src/lib/gemini.ts)
-- Keys: VITE_GEMINI_API_KEY through VITE_GEMINI_API_KEY_6 (all 6 configured)
-- Rotation: round-robin + automatic 429-fallback (switches key on quota exceeded)
-- Rate limit: 2 builds/min per browser session (localStorage bucket)
-- Health tracking: per-key status (ok / limited / error)
-- `getSystemHealth()` → GREEN / YELLOW / RED for System Health Badge
-- `streamWithFallback()` → async generator, yields chunks, handles retries
+- Keys: VITE_GEMINI_API_KEY through VITE_GEMINI_API_KEY_6
+- Rotation: round-robin + 429-fallback; rate limit: 2 builds/min per session
 
-## Factory Interface (Dashboard.tsx)
-- **Header**: Logo (breathing glow) + GREEN/YELLOW/RED health badge + massive prompt bar + Ship it (laser hover) + toolbar + user menu
-- **Body (desktop)**: Left = Live Code panel (50%) | Right = Live Preview iframe (50%)
-- **Code panel**: always visible, streaming, shows sitemap/robots badges when generated
-- **Thinking overlay**: Code Rain canvas (gold/white Matrix characters) over preview
-- **Status bar**: Ready/Streaming indicator + 6-slot key monitor + sitemap/robots + save status
-- **Mobile**: tabs — Compose | Code | Preview
-
-## Data Saved Per Build (Firestore: users/{uid}/projects/{id})
-- `html` — full generated HTML
-- `prompt` — user prompt
-- `title` — auto-extracted or user-set
-- `sitemap` — auto-generated sitemap.xml content
-- `robotsTxt` — auto-generated robots.txt content
-- `seoKeywords` — extracted from meta keywords tag
-- `seoDescription` — extracted from meta description tag
-- `createdAt` / `updatedAt` — Firestore timestamps
-- `sharedSlug` — public share URL slug (optional)
-
-## Auto-SEO in Every Build
-Every generated HTML page automatically includes:
-- `<meta name="description">` (150-160 chars)
-- `<meta name="keywords">` (6-10 terms)
-- `<link rel="canonical">`
-- Open Graph tags (og:title, og:description, og:image, og:url)
-- Twitter Card tags
-- Schema.org JSON-LD (WebPage + Organization)
-- Auto-generated sitemap.xml saved with project
-- Auto-generated robots.txt saved with project
-
-## Key Features
-- **ZIP Export** — all users, produces index.html + README + vercel.json + package.json
-- **Free Build Limit** — 3 free generations for starter tier, then pricing modal
-- **Magic Wand** — AI auto-fix for UI bugs (Pro+)
-- **SEO Master** — AI SEO analysis + fix sidebar (Pro+)
-- **Razorpay** — Pro ₹749/mo, Billionaire ₹3,999/mo
-- **AI Chat Bot** — Floating Gemini-powered assistant
-- **Learning Hub** — 7 tutorials (SEO, YouTube Automation, Vora AI tips)
+## Firestore Collections
+- `users/{uid}/projects/{id}` — project data (html, prompt, seo, sitemap, robotsTxt)
+- `users/{uid}/billing/current` — tier (starter/pro/billionaire)
+- `payment_requests/{id}` — uid, email, txid, plan, amount, status (pending/approved/rejected)
 
 ## Owner
-- Root owner email: saeedautomations295@gmail.com
-- Auto-claimed on sign-in via useTier.ts ROOT_OWNER_EMAIL
-- Full access: Admin Console at /admin
+- Root owner: saeedautomations295@gmail.com → always billionaire tier
+- Admin Console at /admin
 
 ## Environment Secrets Required
 - VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN, VITE_FIREBASE_PROJECT_ID
 - VITE_FIREBASE_STORAGE_BUCKET, VITE_FIREBASE_MESSAGING_SENDER_ID, VITE_FIREBASE_APP_ID
-- VITE_GEMINI_API_KEY (key 1 — system key)
-- VITE_GEMINI_API_KEY_2 through VITE_GEMINI_API_KEY_6 (rotation keys — all configured)
+- VITE_GEMINI_API_KEY through VITE_GEMINI_API_KEY_6
 - VITE_RAZORPAY_KEY_ID
 
-## Firestore Security
-- Currently: `allow read, write: if true` (open for dev — owner confirmed)
-- Recommended for prod: auth-gated rules (see /admin Setup tab)
+## Gotchas
+- Replace `YOUR_BINANCE_PAY_ID_HERE` in `src/components/BinancePayModal.tsx` before going live
+- Firestore rules currently open (`allow read, write: if true`) — tighten before prod
+- PricingModal uses `onOpenChange` prop (not `onClose`) — corrected in Dashboard
+- PWA install prompts only fire on HTTPS (works after deployment, not on localhost)

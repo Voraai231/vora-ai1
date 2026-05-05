@@ -506,9 +506,18 @@ export default function LandingPage() {
             <span className="font-bold tracking-widest text-[#E5E4E2]/20">VORA AI</span>
           </div>
           <p>© {new Date().getFullYear()} Vora AI. All rights reserved. Powered by Gemini 2.5 Flash.</p>
-          <p className="mt-1">
-            <button onClick={() => setShowTerms(true)} className="underline hover:text-white/25 transition-colors">Terms & Conditions</button>
-            {" · "}Privacy Policy
+          <p className="mt-2 flex items-center justify-center gap-3 flex-wrap">
+            {[
+              { label: "Pricing", href: "/pricing" },
+              { label: "Terms", href: "/terms" },
+              { label: "Privacy", href: "/privacy" },
+              { label: "Refund Policy", href: "/refund" },
+            ].map(({ label, href }) => (
+              <button key={label} onClick={() => setLocation(href)}
+                className="hover:text-white/30 transition-colors underline underline-offset-2">
+                {label}
+              </button>
+            ))}
           </p>
         </div>
       </section>
