@@ -6,7 +6,8 @@ import { isRootOwner } from "@/hooks/useTier";
 import {
   getOwnerConfig, claimOwnership, initializeOwnerProfile, getTotalUsers, getTotalProjects,
   getTotalSharedProjects, getAllProjects, adminDeleteProject,
-  getAnalyticsCounters, AdminProjectRow, OwnerConfig, AnalyticsCounters,
+  getAnalyticsCounters, getPaymentRequests, approvePaymentRequest, rejectPaymentRequest,
+  AdminProjectRow, OwnerConfig, AnalyticsCounters, PaymentRequestRow,
 } from "@/lib/admin";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +17,7 @@ import {
   ArrowLeft, Loader2, Users, FolderKanban, Globe, ShieldCheck,
   ExternalLink, AlertTriangle, KeyRound, Search, Trash2, RefreshCw,
   BarChart3, Zap, MousePointer, Download, Eye, Settings, Copy, CheckCircle,
+  CreditCard, CheckCircle2, XCircle, Clock, Wallet,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatDistanceToNow } from "date-fns";
@@ -105,8 +107,11 @@ export default function Admin() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<AdminProjectRow | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"projects" | "analytics" | "setup">("projects");
+  const [activeTab, setActiveTab] = useState<"payments" | "projects" | "analytics" | "setup">("payments");
   const [copiedRules, setCopiedRules] = useState(false);
+  const [payments, setPayments] = useState<PaymentRequestRow[]>([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [processingId, setProcessingId] = useState<string | null>(null);
 
   const isOwner = !!user && (
     isRootOwner(user.email) ||
@@ -167,6 +172,49 @@ export default function Admin() {
   };
 
   useEffect(() => { loadData(); }, [isOwner]);
+
+  const loadPayments = async () => {
+    if (!isOwner) return;
+    setPaymentsLoading(true);
+    try {
+      const rows = await getPaymentRequests();
+      setPayments(rows);
+    } catch (err: any) {
+      toast({ title: "Failed to load payments", description: err.message, variant: "destructive" });
+    } finally {
+      setPaymentsLoading(false);
+    }
+  };
+
+  useEffect(() => { if (isOwner) loadPayments(); }, [isOwner]);
+
+  const handleApprove = async (req: PaymentRequestRow) => {
+    if (!confirm(`Approve payment from ${req.email}?\n\nPlan: ${req.plan}\nAmount: ${req.amount}\nTXID: ${req.txid}\n\nThis will activate Pro access for this user immediately.`)) return;
+    setProcessingId(req.id);
+    try {
+      await approvePaymentRequest(req.id, req.uid);
+      setPayments(prev => prev.map(p => p.id === req.id ? { ...p, status: "approved" } : p));
+      toast({ title: "✅ Payment approved!", description: `Pro access activated for ${req.email}` });
+    } catch (err: any) {
+      toast({ title: "Approval failed", description: err.message, variant: "destructive" });
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleReject = async (req: PaymentRequestRow) => {
+    if (!confirm(`Reject payment from ${req.email}?\n\nTXID: ${req.txid}\n\nThe user will NOT get Pro access.`)) return;
+    setProcessingId(req.id);
+    try {
+      await rejectPaymentRequest(req.id);
+      setPayments(prev => prev.map(p => p.id === req.id ? { ...p, status: "rejected" } : p));
+      toast({ title: "Payment rejected", description: `${req.email} — access denied.` });
+    } catch (err: any) {
+      toast({ title: "Rejection failed", description: err.message, variant: "destructive" });
+    } finally {
+      setProcessingId(null);
+    }
+  };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -309,8 +357,9 @@ export default function Admin() {
           </div>
         )}
 
-        <div className="flex gap-2 border-b border-border/30">
+        <div className="flex gap-2 border-b border-border/30 overflow-x-auto">
           {([
+            { id: "payments", label: <><CreditCard className="w-4 h-4 inline mr-1.5" />Payments {payments.filter(p=>p.status==="pending").length > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 text-[10px] font-bold">{payments.filter(p=>p.status==="pending").length}</span>}</> },
             { id: "projects", label: <><FolderKanban className="w-4 h-4 inline mr-1.5" />All Projects ({filtered.length})</> },
             { id: "analytics", label: <><BarChart3 className="w-4 h-4 inline mr-1.5" />Analytics</> },
             { id: "setup", label: <><Settings className="w-4 h-4 inline mr-1.5" />Setup Guide</> },
@@ -318,7 +367,7 @@ export default function Admin() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex items-center ${
                 activeTab === tab.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -326,6 +375,136 @@ export default function Admin() {
             </button>
           ))}
         </div>
+
+        {activeTab === "payments" && (
+          <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <h2 className="font-bold text-lg">Crypto Payment Requests</h2>
+                <p className="text-sm text-muted-foreground">Review submitted TXIDs and activate Pro access with one click.</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={loadPayments} disabled={paymentsLoading} className="shrink-0">
+                <RefreshCw className={`w-4 h-4 mr-2 ${paymentsLoading ? "animate-spin" : ""}`} /> Refresh
+              </Button>
+            </div>
+
+            {/* Summary badges */}
+            <div className="flex items-center gap-3 flex-wrap">
+              {[
+                { label: "Pending", count: payments.filter(p=>p.status==="pending").length, color: "text-yellow-400 bg-yellow-500/10 border-yellow-500/25" },
+                { label: "Approved", count: payments.filter(p=>p.status==="approved").length, color: "text-green-400 bg-green-500/10 border-green-500/25" },
+                { label: "Rejected", count: payments.filter(p=>p.status==="rejected").length, color: "text-red-400 bg-red-500/10 border-red-500/25" },
+              ].map(({ label, count, color }) => (
+                <div key={label} className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold ${color}`}>
+                  {label}: {count}
+                </div>
+              ))}
+            </div>
+
+            {paymentsLoading ? (
+              <div className="py-20 flex items-center justify-center">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+              </div>
+            ) : payments.length === 0 ? (
+              <div className="py-20 text-center border border-dashed border-border/50 rounded-xl">
+                <Wallet className="w-10 h-10 text-muted-foreground mx-auto mb-3 opacity-30" />
+                <p className="text-muted-foreground text-sm">No payment requests yet.</p>
+                <p className="text-xs text-muted-foreground/50 mt-1">They'll appear here when users submit TXIDs.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {payments.map((req, i) => {
+                  const isPending = req.status === "pending";
+                  const isApproved = req.status === "approved";
+                  const isProcessing = processingId === req.id;
+                  const createdDate = req.createdAt instanceof Timestamp ? req.createdAt.toDate()
+                    : req.createdAt instanceof Date ? req.createdAt : null;
+
+                  return (
+                    <motion.div key={req.id}
+                      initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: Math.min(i * 0.04, 0.3) }}
+                      className={`rounded-2xl border p-5 transition-all ${
+                        isPending ? "border-yellow-500/20 bg-yellow-500/3" :
+                        isApproved ? "border-green-500/20 bg-green-500/3" :
+                        "border-border/30 bg-secondary/10 opacity-60"
+                      }`}>
+                      <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                        {/* Status badge */}
+                        <div className="shrink-0">
+                          {isPending && <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-yellow-500/12 border border-yellow-500/25 text-yellow-400 text-[11px] font-bold"><Clock className="w-3 h-3" />Pending</div>}
+                          {isApproved && <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/12 border border-green-500/25 text-green-400 text-[11px] font-bold"><CheckCircle2 className="w-3 h-3" />Approved</div>}
+                          {req.status === "rejected" && <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/12 border border-red-500/25 text-red-400 text-[11px] font-bold"><XCircle className="w-3 h-3" />Rejected</div>}
+                        </div>
+
+                        {/* Info */}
+                        <div className="flex-1 min-w-0 space-y-2">
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                            <span className="font-semibold text-sm text-foreground truncate">{req.displayName || req.email}</span>
+                            <span className="text-xs text-muted-foreground truncate">{req.email}</span>
+                            {createdDate && (
+                              <span className="text-xs text-muted-foreground">{formatDistanceToNow(createdDate, { addSuffix: true })}</span>
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-primary/8 border border-primary/15 text-primary text-xs font-bold">
+                              <Wallet className="w-3 h-3" />{req.amount}
+                            </div>
+                            <div className="text-xs text-muted-foreground px-2.5 py-1 rounded-lg bg-secondary/40 border border-border/30">
+                              Plan: <strong className="text-foreground">{req.plan}</strong>
+                            </div>
+                          </div>
+
+                          <div className="flex items-start gap-2">
+                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold shrink-0 mt-0.5">TXID</span>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <code className="text-xs font-mono text-foreground/70 break-all leading-relaxed">{req.txid}</code>
+                              <button onClick={() => { navigator.clipboard.writeText(req.txid); toast({ title: "TXID copied" }); }}
+                                className="shrink-0 p-1 rounded hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors">
+                                <Copy className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {req.notes && (
+                            <p className="text-xs text-muted-foreground italic">Note: {req.notes}</p>
+                          )}
+
+                          <div className="text-[10px] font-mono text-muted-foreground/40 truncate">UID: {req.uid}</div>
+                        </div>
+
+                        {/* Action buttons */}
+                        {isPending && (
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Button size="sm" disabled={!!processingId}
+                              onClick={() => handleApprove(req)}
+                              className="bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 hover:text-green-300 font-bold text-xs rounded-xl">
+                              {isProcessing ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1" />}
+                              Approve
+                            </Button>
+                            <Button size="sm" variant="ghost" disabled={!!processingId}
+                              onClick={() => handleReject(req)}
+                              className="text-red-400 hover:bg-red-500/10 border border-red-500/20 hover:border-red-500/30 font-bold text-xs rounded-xl">
+                              {isProcessing ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <XCircle className="w-3.5 h-3.5 mr-1" />}
+                              Reject
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="p-4 rounded-xl border border-border/30 bg-secondary/10 text-xs text-muted-foreground leading-relaxed">
+              <strong className="text-foreground">How to verify a TXID:</strong> Copy the TXID above → open{" "}
+              <a href="https://bscscan.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">BscScan.com</a>{" "}
+              or Binance app → paste TXID → confirm the amount matches and the recipient is your Binance Pay ID (455374164) → click Approve.
+            </div>
+          </motion.section>
+        )}
 
         {activeTab === "analytics" && (
           <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>

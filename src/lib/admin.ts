@@ -1,10 +1,60 @@
 import { db, hasFirebaseConfig } from "@/lib/firebase";
 import {
   collection, doc, getCountFromServer, getDoc,
-  getDocs, setDoc, deleteDoc,
+  getDocs, setDoc, deleteDoc, updateDoc, query, orderBy,
   serverTimestamp, Timestamp,
 } from "firebase/firestore";
 import { User } from "firebase/auth";
+
+export interface PaymentRequestRow {
+  id: string;
+  uid: string;
+  email: string;
+  displayName: string;
+  txid: string;
+  plan: string;
+  amount: string;
+  status: "pending" | "approved" | "rejected";
+  notes: string;
+  createdAt: Timestamp | Date | null;
+}
+
+export async function getPaymentRequests(): Promise<PaymentRequestRow[]> {
+  if (!hasFirebaseConfig) return [];
+  try {
+    const q = query(collection(db, "payment_requests"), orderBy("createdAt", "desc"));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as PaymentRequestRow));
+  } catch {
+    // fallback without orderBy if index not ready
+    const snap = await getDocs(collection(db, "payment_requests"));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as PaymentRequestRow));
+  }
+}
+
+export async function approvePaymentRequest(requestId: string, uid: string): Promise<void> {
+  if (!hasFirebaseConfig) throw new Error("Firebase not configured");
+  // Mark request approved
+  await updateDoc(doc(db, "payment_requests", requestId), {
+    status: "approved",
+    approvedAt: serverTimestamp(),
+  });
+  // Activate Pro tier for the user
+  await setDoc(doc(db, "users", uid, "billing", "current"), {
+    tier: "pro",
+    upgradedAt: serverTimestamp(),
+    source: "binance_pay",
+    paymentRequestId: requestId,
+  }, { merge: true });
+}
+
+export async function rejectPaymentRequest(requestId: string): Promise<void> {
+  if (!hasFirebaseConfig) throw new Error("Firebase not configured");
+  await updateDoc(doc(db, "payment_requests", requestId), {
+    status: "rejected",
+    rejectedAt: serverTimestamp(),
+  });
+}
 
 export interface AdminProjectRow {
   id: string;
