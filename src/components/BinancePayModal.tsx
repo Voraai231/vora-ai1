@@ -13,7 +13,7 @@ import {
   ExternalLink, Zap, Check, AlertCircle,
 } from "lucide-react";
 
-const BINANCE_PAY_ID = "YOUR_BINANCE_PAY_ID_HERE";
+const BINANCE_PAY_ID = "455374164";
 const QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&color=00E5FF&bgcolor=050505&data=${encodeURIComponent(BINANCE_PAY_ID)}&format=svg&margin=10`;
 
 const PLANS = [
